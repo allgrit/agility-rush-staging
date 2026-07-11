@@ -276,6 +276,12 @@ window.__harness = {
       } : null,
       judgeT: +game.judgeT.toFixed(1),
       powerups: { ...game.powerups },
+      tutorial: {
+        active: game.tutorial.active,
+        curType: game.tutorial.curType,
+        shown: [...game.tutorial.shown],
+        hintVisible: (() => { const el = document.getElementById('tut-hint'); return !!el && getComputedStyle(el).display !== 'none'; })(),
+      },
       zone: game.world.currentZone,
       groundNear: Math.min(...game.world.groundSegs.map(s2 => Math.abs(s2.position.z - d.z))),
       // Ближайшие сущности впереди — чтобы планировать входы

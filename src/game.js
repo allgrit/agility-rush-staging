@@ -29,9 +29,10 @@ const TUT_GESTURE = {
   dogwalk: { name: 'БУМ',     dir: 'side', touch: 'НАКЛОНЯЙ ← →', key: '← → БАЛАНС' },
   table:   { name: 'СТОЛ',    dir: 'up',   touch: 'ЗАСКОЧИ',      key: 'ЗАСКОЧИ' },
 };
-// Дистанция (м), на которой всплывает подсказка — по типу снаряда, чтобы жест показывался
-// когда действие уже уместно (у прыжковых — ближе апекса прыжка, у контактных — у захода).
-const TUT_RANGE = { hurdle: 7, tire: 7, tunnel: 6, weave: 5, aframe: 5, dogwalk: 4.5, seesaw: 5, table: 5 };
+// Дистанция (м), на которой всплывает подсказка у ПРЫЖКОВЫХ/подката — чтобы игрок успел
+// среагировать и прыгнуть/присесть вовремя. Контактные и слалом показываются по факту
+// нахождения на них (см. _updateTutorial), поэтому здесь их нет.
+const TUT_RANGE = { hurdle: 6, tire: 6, tunnel: 6, table: 5 };
 
 // Очки
 const SCORE_CLEAN = 100, SCORE_PERFECT_MULT = 2, SCORE_TABLE = 300, SCORE_COOKIE = 10;
@@ -68,7 +69,7 @@ export class Game {
       || (typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches)
       || (typeof window !== 'undefined' && 'ontouchstart' in window);
     this.forceTut = _q.has('tut');
-    this.tutorial = { active: false, shown: new Set(), curType: null };
+    this.tutorial = { active: false, shown: new Set(), curType: null, curTarget: null };
     this.timeScale = 1;
     this.slowmoT = 0;
     this._resetRunState();
@@ -204,6 +205,7 @@ export class Game {
     this.tutorial.active = !instant && (this.forceTut || !tutDone);
     this.tutorial.shown.clear();
     this.tutorial.curType = null;
+    this.tutorial.curTarget = null;
     this.ui.hideTutHint();
   }
 
@@ -1149,21 +1151,39 @@ export class Game {
   // (дистанция подобрана по типу — чтобы жест показывался, когда пора жать, а не слишком
   // рано). Замедление держится, пока снаряд не пройден. Обучаемый снаряд «прощающий».
   _updateTutorial() {
-    if (this.tutorial.curType) return; // подсказка уже висит — ждём прохождения
-    const d = this.dog;
+    const d = this.dog, t = this.tutorial;
+    // Страховка снятия: снаряд пройден или остался позади (в т.ч. когда прошёл мимо в
+    // другой полосе — тогда _recordObstacle не вызывается). Иначе подсказка залипает.
+    if (t.curType) {
+      const tg = t.curTarget;
+      const gone = !tg || tg.resolved || (tg.z != null && tg.z > d.z + 1.2);
+      const onIt = this.weave === tg || this.onApparatus === tg;
+      if (gone && !onIt) { t.shown.add(t.curType); t.curType = null; t.curTarget = null; this.ui.hideTutHint(); }
+      else return; // подсказка ещё актуальна
+    }
+    // Ритмовые/контактные снаряды показываем В МОМЕНТ нахождения на них — тогда жест
+    // соответствует вводу (тап-в-ритм у слалома, баланс/вниз у бумов), а не провоцирует
+    // прыжок заранее. Прыжковые/подкат — по выверенной дистанции, только в своей полосе.
+    if (this.weave && !t.shown.has('weave')) return this._tutShow('weave', this.weave);
+    if (this.onApparatus && !t.shown.has(this.onApparatus.kind)) return this._tutShow(this.onApparatus.kind, this.onApparatus);
     let best = null, bestDist = Infinity;
     for (const e of this.track.entities) {
-      if (!e || e.resolved || !TUT_GESTURE[e.kind] || this.tutorial.shown.has(e.kind)) continue;
-      const dist = d.z - e.z; // снаряд впереди по трассе
+      if (!e || e.resolved || !TUT_GESTURE[e.kind] || t.shown.has(e.kind)) continue;
+      if (e.kind === 'weave' || e.kind === 'dogwalk' || e.kind === 'seesaw' || e.kind === 'aframe') continue; // по факту нахождения
+      if (!this._laneMatch(e)) continue; // не в нашей полосе — не учим на этом
+      const dist = d.z - e.z;
       const maxD = TUT_RANGE[e.kind] || 7;
-      if (dist > 2 && dist < maxD && dist < bestDist) { bestDist = dist; best = e; }
+      if (dist > 1.5 && dist < maxD && dist < bestDist) { bestDist = dist; best = e; }
     }
-    if (best) {
-      this.tutorial.curType = best.kind;
-      const g = TUT_GESTURE[best.kind];
-      this.ui.showTutHint(g.name, g.dir, this.isTouch ? g.touch : g.key, this.isTouch);
-      track('tutorial_hint', { obstacle: best.kind });
-    }
+    if (best) this._tutShow(best.kind, best);
+  }
+
+  _tutShow(kind, target) {
+    this.tutorial.curType = kind;
+    this.tutorial.curTarget = target;
+    const g = TUT_GESTURE[kind];
+    this.ui.showTutHint(g.name, g.dir, this.isTouch ? g.touch : g.key, this.isTouch);
+    track('tutorial_hint', { obstacle: kind });
   }
 
   _stumble(withFault, reason) {
