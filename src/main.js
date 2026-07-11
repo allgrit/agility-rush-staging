@@ -279,7 +279,8 @@ window.__harness = {
       tutorial: {
         active: game.tutorial.active,
         curType: game.tutorial.curType,
-        shown: [...game.tutorial.shown],
+        learned: { ...game.tutorial.learned },
+        count: { ...game.tutorial.count },
         hintVisible: (() => { const el = document.getElementById('tut-hint'); return !!el && getComputedStyle(el).display !== 'none'; })(),
       },
       zone: game.world.currentZone,

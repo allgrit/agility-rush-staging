@@ -33,6 +33,7 @@ const TUT_GESTURE = {
 // среагировать и прыгнуть/присесть вовремя. Контактные и слалом показываются по факту
 // нахождения на них (см. _updateTutorial), поэтому здесь их нет.
 const TUT_RANGE = { hurdle: 6, tire: 6, tunnel: 6, table: 5 };
+const TUT_MAX_SHOWS = 5; // сколько раз максимум показать подсказку типа (если игрок не освоил)
 
 // Очки
 const SCORE_CLEAN = 100, SCORE_PERFECT_MULT = 2, SCORE_TABLE = 300, SCORE_COOKIE = 10;
@@ -69,7 +70,11 @@ export class Game {
       || (typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches)
       || (typeof window !== 'undefined' && 'ontouchstart' in window);
     this.forceTut = _q.has('tut');
-    this.tutorial = { active: false, shown: new Set(), curType: null, curTarget: null };
+    // Обучение: показываем подсказку по типу снаряда, пока игрок не пройдёт его ЧИСТО
+    // (learned — помним между сессиями), но не более TUT_MAX_SHOWS раз (count) — чтобы не надоедало.
+    let _learned = {};
+    try { _learned = JSON.parse(localStorage.getItem('agility_tut_learned') || '{}'); } catch { _learned = {}; }
+    this.tutorial = { active: false, count: {}, learned: _learned, curType: null, curTarget: null };
     this.timeScale = 1;
     this.slowmoT = 0;
     this._resetRunState();
@@ -199,11 +204,10 @@ export class Game {
     this._msSeen = new Set();
     this._runStartMs = Date.now();
     track('run_start', { run_id: this._runId, run_index: this._runIndex, dog: this.breed, seed: this.seed, ver: this.metaMult });
-    // Обучение «за руку» — только в первую живую сессию (не в харнессе instant, где детерминизм).
-    let tutDone = false;
-    try { tutDone = !!localStorage.getItem('agility_tut_done'); } catch { tutDone = true; }
-    this.tutorial.active = !instant && (this.forceTut || !tutDone);
-    this.tutorial.shown.clear();
+    // Обучение «за руку» — в живой игре (не в харнессе instant, где детерминизм). Показ
+    // фильтруется по learned/count в _updateTutorial. Тест-режим ?tut сбрасывает прогресс.
+    this.tutorial.active = !instant;
+    if (this.forceTut) { this.tutorial.count = {}; this.tutorial.learned = {}; }
     this.tutorial.curType = null;
     this.tutorial.curTarget = null;
     this.ui.hideTutHint();
@@ -240,6 +244,9 @@ export class Game {
       this.timeScale = 0.05; // стоп-кадр: «это имело значение»
       if (this.hitstopT <= 0) this.timeScale = this.slowmoT > 0 ? 0.35 : 1;
     }
+    // Обучение: пока висит подсказка к снаряду — мягко замедляем, чтобы игрок успел
+    // прочитать жест и попасть в момент. Снимается вместе с подсказкой (не залипает).
+    if (this.tutorial.active && this.tutorial.curType) this.timeScale = Math.min(this.timeScale, 0.55);
     const dt = dtRaw * this.timeScale;
     this.popups.update(dtRaw);
 
@@ -683,7 +690,7 @@ export class Game {
         e.occupied = false; e.resolved = true;
         if (st.contactHit) this._obstacleClean(e, 'perfect', 'ГОРКА');
         else if (st.contactEarly) this._obstacleClean(e, 'clean', 'ГОРКА');
-        else this._fault(e, 'МИМО КОНТАКТА');
+        else this._fault(e, 'МИМО ЗОНЫ');
         this.onApparatus = null; this.apparatusState = null;
       }
     } else if (e.kind === 'dogwalk') {
@@ -1136,10 +1143,12 @@ export class Game {
       || (this.obstacleStats[kind] = { seen: 0, perfect: 0, clean: 0, fault: 0, death: 0 });
     s.seen++;
     if (s[grade] !== undefined) s[grade]++;
-    // Обучение: снаряд, к которому вели, пройден — гасим подсказку и замедление.
+    // Обучение: прошёл нормально (clean/perfect) — считаем освоенным, больше не учим этому типу.
+    if (grade === 'clean' || grade === 'perfect') this._tutLearn(kind);
+    // Снаряд, к которому вели, пройден (любой исход) — гасим подсказку.
     if (this.tutorial.active && this.tutorial.curType === kind) {
-      this.tutorial.shown.add(kind);
       this.tutorial.curType = null;
+      this.tutorial.curTarget = null;
       this.ui.hideTutHint();
     }
   }
@@ -1155,14 +1164,16 @@ export class Game {
       const tg = t.curTarget;
       const gone = !tg || tg.resolved || (tg.z != null && tg.z > d.z + 1.2);
       const onIt = this.weave === tg || this.onApparatus === tg;
-      if (gone && !onIt) { t.shown.add(t.curType); t.curType = null; t.curTarget = null; this.ui.hideTutHint(); }
-      else return; // подсказка ещё актуальна
+      if (gone && !onIt) {
+        if (t.curType === 'dodge') this._tutLearn('dodge'); // помеху миновали — обходу научились
+        t.curType = null; t.curTarget = null; this.ui.hideTutHint();
+      } else return; // подсказка ещё актуальна
     }
     // Ритмовые/контактные снаряды показываем В МОМЕНТ нахождения на них — тогда жест
     // соответствует вводу (тап-в-ритм у слалома, баланс/вниз у бумов), а не провоцирует
     // прыжок заранее. Прыжковые/подкат — по выверенной дистанции, только в своей полосе.
-    if (this.weave && !t.shown.has('weave')) return this._tutShow('weave', this.weave);
-    if (this.onApparatus && !t.shown.has(this.onApparatus.kind)) {
+    if (this.weave && this._tutWant('weave')) return this._tutShow('weave', this.weave);
+    if (this.onApparatus && this._tutWant(this.onApparatus.kind)) {
       // Показываем жест «вниз» только когда окно действия ОТКРЫТО (иначе игрок жмёт «рано»):
       // качели — доска легла (bangWindow), горка — в зоне контакта. Бум — баланс сразу.
       const e = this.onApparatus, st = this.apparatusState;
@@ -1173,7 +1184,7 @@ export class Game {
       if (ready) return this._tutShow(e.kind, e);
     }
     // Обучение обходу: летальная помеха в нашей полосе — показываем свайп на свободную сторону.
-    if (!t.shown.has('dodge')) {
+    if (this._tutWant('dodge')) {
       const haz = this.track.entities.find(e => e && !e.resolved && (e.kind === 'cart' || e.kind === 'fence')
         && this._laneMatch(e) && (d.z - e.z) > 2 && (d.z - e.z) < 14);
       if (haz) {
@@ -1192,7 +1203,7 @@ export class Game {
     }
     let best = null, bestDist = Infinity;
     for (const e of this.track.entities) {
-      if (!e || e.resolved || !TUT_GESTURE[e.kind] || t.shown.has(e.kind)) continue;
+      if (!e || e.resolved || !TUT_GESTURE[e.kind] || !this._tutWant(e.kind)) continue;
       if (e.kind === 'weave' || e.kind === 'dogwalk' || e.kind === 'seesaw' || e.kind === 'aframe') continue; // по факту нахождения
       if (!this._laneMatch(e)) continue; // не в нашей полосе — не учим на этом
       const dist = d.z - e.z;
@@ -1202,9 +1213,20 @@ export class Game {
     if (best) this._tutShow(best.kind, best);
   }
 
+  // Показывать ли подсказку типа: пока не освоен (learned) и не исчерпан лимит показов.
+  _tutWant(kind) { return !this.tutorial.learned[kind] && (this.tutorial.count[kind] || 0) < TUT_MAX_SHOWS; }
+
+  // Освоено: игрок прошёл тип нормально (clean/perfect) — помним между сессиями, больше не учим.
+  _tutLearn(kind) {
+    if (!kind || this.tutorial.learned[kind]) return;
+    this.tutorial.learned[kind] = true;
+    try { localStorage.setItem('agility_tut_learned', JSON.stringify(this.tutorial.learned)); } catch { /* ignore */ }
+  }
+
   _tutShow(kind, target) {
     this.tutorial.curType = kind;
     this.tutorial.curTarget = target;
+    this.tutorial.count[kind] = (this.tutorial.count[kind] || 0) + 1;
     const g = TUT_GESTURE[kind];
     this.ui.showTutHint(g.name, g.dir, this.isTouch ? g.touch : g.key, this.isTouch);
     track('tutorial_hint', { obstacle: kind });
@@ -1320,11 +1342,9 @@ export class Game {
 
   _finishRun() {
     const rs = this.runStats;
-    // Первая сессия отыграна — больше не ведём за руку (кроме тест-режима ?tut).
-    if (this.tutorial.active && !this.forceTut) {
-      try { localStorage.setItem('agility_tut_done', '1'); } catch { /* ignore */ }
-      this.tutorial.active = false;
-    }
+    // Обучение затухает само (learned/count), между забегами прогресс сохраняется — здесь
+    // просто гасим подсказку. curType сбросим на следующем старте.
+    this.tutorial.curType = null;
     this.ui.hideTutHint();
     // Аналитика: конец забега
     track('run_end', {
