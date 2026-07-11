@@ -240,9 +240,6 @@ export class Game {
       this.timeScale = 0.05; // стоп-кадр: «это имело значение»
       if (this.hitstopT <= 0) this.timeScale = this.slowmoT > 0 ? 0.35 : 1;
     }
-    // Обучение «за руку»: пока висит подсказка к новому снаряду — замедляем, чтобы
-    // игрок успел прочитать жест и среагировать. Снимается, когда снаряд пройден.
-    if (this.tutorial.active && this.tutorial.curType) this.timeScale = Math.min(this.timeScale, 0.4);
     const dt = dtRaw * this.timeScale;
     this.popups.update(dtRaw);
 
@@ -1165,7 +1162,34 @@ export class Game {
     // соответствует вводу (тап-в-ритм у слалома, баланс/вниз у бумов), а не провоцирует
     // прыжок заранее. Прыжковые/подкат — по выверенной дистанции, только в своей полосе.
     if (this.weave && !t.shown.has('weave')) return this._tutShow('weave', this.weave);
-    if (this.onApparatus && !t.shown.has(this.onApparatus.kind)) return this._tutShow(this.onApparatus.kind, this.onApparatus);
+    if (this.onApparatus && !t.shown.has(this.onApparatus.kind)) {
+      // Показываем жест «вниз» только когда окно действия ОТКРЫТО (иначе игрок жмёт «рано»):
+      // качели — доска легла (bangWindow), горка — в зоне контакта. Бум — баланс сразу.
+      const e = this.onApparatus, st = this.apparatusState;
+      const ready = e.kind === 'dogwalk' ? true
+        : e.kind === 'seesaw' ? !!(st && st.bangWindow > 0)
+        : e.kind === 'aframe' ? (d.z <= e.contactStart && d.z >= e.contactEnd - 0.3)
+        : true;
+      if (ready) return this._tutShow(e.kind, e);
+    }
+    // Обучение обходу: летальная помеха в нашей полосе — показываем свайп на свободную сторону.
+    if (!t.shown.has('dodge')) {
+      const haz = this.track.entities.find(e => e && !e.resolved && (e.kind === 'cart' || e.kind === 'fence')
+        && this._laneMatch(e) && (d.z - e.z) > 2 && (d.z - e.z) < 14);
+      if (haz) {
+        const danger = (lane) => this.track.entities.some(e => e && !e.resolved && (e.kind === 'cart' || e.kind === 'fence')
+          && e.lane === lane && (d.z - e.z) > -1 && (d.z - e.z) < 16);
+        const free = [d.lane - 1, d.lane + 1].filter(l => l >= 0 && l <= 2 && !danger(l));
+        if (free.length) {
+          const side = free[0] < d.lane ? 'left' : 'right';
+          t.curType = 'dodge'; t.curTarget = haz;
+          this.ui.showTutHint('ОБХОД', side,
+            this.isTouch ? (side === 'left' ? 'СВАЙП ВЛЕВО' : 'СВАЙП ВПРАВО') : (side === 'left' ? '←' : '→'), this.isTouch);
+          track('tutorial_hint', { obstacle: 'dodge' });
+          return;
+        }
+      }
+    }
     let best = null, bestDist = Infinity;
     for (const e of this.track.entities) {
       if (!e || e.resolved || !TUT_GESTURE[e.kind] || t.shown.has(e.kind)) continue;
