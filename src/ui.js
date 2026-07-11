@@ -1,0 +1,543 @@
+import { DOG_SHOP, TITLES, plural } from './meta.js';
+import { fetchTop, submitScore } from './leaderboard.js';
+import { track } from './analytics.js';
+import { APP_VERSION } from './version.js';
+
+// Весь HUD и меню — DOM поверх канваса: чётче текст, дешевле анимации (CSS).
+
+// Цветная SVG-розетка (эмодзи 🏵 в headless/тёмной теме читается плохо)
+function rosetteSVG(color = '#f0c531', size = 34) {
+  return `<svg width="${size}" height="${size}" viewBox="0 0 40 48">
+    <path d="M17 28 L14 46 L20 41 L26 46 L23 28 Z" fill="${color}" opacity="0.85"/>
+    <circle cx="20" cy="17" r="14" fill="${color}"/>
+    <circle cx="20" cy="17" r="9" fill="#fff" opacity="0.25"/>
+    <circle cx="20" cy="17" r="5.5" fill="#fffbe8"/>
+  </svg>`;
+}
+
+export class UI {
+  constructor(meta) {
+    this.meta = meta;
+    this.root = document.getElementById('ui');
+    this.hud = document.getElementById('hud');
+    this.scoreEl = document.getElementById('score');
+    this.cookieEl = document.getElementById('cookies');
+    this.comboEl = document.getElementById('combo');
+    this.comboFill = document.getElementById('combo-fill');
+    this.powerupsEl = document.getElementById('powerups');
+    this.menuEl = document.getElementById('menu');
+    this.overEl = document.getElementById('gameover');
+    this.countdownEl = document.getElementById('countdown');
+    this.missionToast = document.getElementById('mission-toast');
+    this.vignette = document.getElementById('vignette');
+    this.speedlines = document.getElementById('speedlines');
+    this.flashEl = document.getElementById('flash');
+    this._displayScore = 0;
+  }
+
+  showMenu(onStart, onSelectDog) {
+    this.hud.style.display = 'none';
+    this.overEl.style.display = 'none';
+    this.menuEl.style.display = 'flex';
+    const d = this.meta.data;
+    // Разовое уведомление о восстановленном забеге (после краша/обновления)
+    const rec = this.meta.recovered;
+    this.meta.recovered = null;
+    const title = this.meta.title();
+    const missions = this.meta.activeMissions();
+    this.menuEl.innerHTML = `
+      <div class="menu-card">
+        <div class="hero">
+          <img src="./assets/hero.png" alt="">
+          <div class="hero-title"><h1>AGILITY<span> RUSH</span></h1>
+          <div class="subtitle">Бесконечный чемпионат по аджилити</div></div>
+        </div>
+        <div class="title-row">
+          <span class="rosette">${rosetteSVG(title.current.color, 34)}</span>
+          <div>
+            <div class="title-name">${title.current.name}</div>
+            <div class="title-bar"><i style="width:${Math.floor(title.progress * 100)}%"></i></div>
+            ${title.next
+              ? `<div class="title-next">${d.totalScore.toLocaleString('ru')} / ${title.next.need.toLocaleString('ru')} · до «${title.next.gen}» осталось ${(title.next.need - d.totalScore).toLocaleString('ru')}</div>`
+              : '<div class="title-next">Максимальный титул!</div>'}
+          </div>
+        </div>
+        ${rec ? `<div class="recovered-row">💾 Восстановлен прошлый забег: <b>+${rec.cookies}🦴</b>, ${rec.distance} м</div>` : ''}
+        <div class="dogs-row">
+          ${DOG_SHOP.map(dog => {
+            const owned = d.unlocked.includes(dog.key);
+            const sel = d.selectedDog === dog.key;
+            const canBuy = !owned && d.cookies >= dog.cost;
+            return `<button class="dog-card ${sel ? 'sel' : ''} ${owned ? '' : 'locked'}" data-dog="${dog.key}">
+              <div class="dog-emoji"><img src="./assets/dog-${dog.key}.png" alt=""></div>
+              <div class="dog-name">${dog.name}</div>
+              <div class="dog-perk">${dog.perk}</div>
+              ${owned ? '' : `<div class="dog-price ${canBuy ? 'can' : ''}">🔒 Купить: 🦴 ${dog.cost}</div>`}
+            </button>`;
+          }).join('')}
+        </div>
+        <button class="start-btn" id="start-btn">СТАРТ</button>
+        <div class="controls-hint">← → полосы · ↑ прыжок · ↓ подкат</div>
+        <div class="missions">
+          ${missions.map(m => {
+            const best = Math.min(m.best, m.target);
+            const pc = Math.floor(best / m.target * 100);
+            return `<div class="mission ${m.done ? 'done' : ''}">
+              <div class="mission-line">🎯 ${m.text} <span>+${m.reward}🦴</span></div>
+              <div class="mission-bar"><i style="width:${pc}%"></i></div>
+              <div class="mission-best">лучшее: ${best} / ${m.target}</div>
+            </div>`;
+          }).join('')}
+        </div>
+        ${(() => {
+          const daily = this.meta.daily();
+          const prog = daily.word.split('').map((ch, i) => i < daily.collected ? ch : '·').join(' ');
+          const doneCls = daily.collected >= daily.word.length ? 'done' : '';
+          return `<div class="daily-row ${doneCls}">
+            <span>🔤 Слово дня: <b>${prog}</b></span>
+            <span>${daily.streak > 0 ? '🔥 ' + daily.streak : ''}</span>
+          </div>`;
+        })()}
+        <div class="gift-row" id="gift-row">
+          ${this.meta.giftReady()
+            ? '<button class="gift-btn" id="gift-btn">🎁 Миска корма — забрать!</button>'
+            : `<span class="gift-wait">🎁 Подарок через ${this.meta.giftCountdown()}</span>`}
+        </div>
+        <div class="rivals" id="rivals">
+          <div class="rivals-head"><button class="lb-open" id="lb-open">🏅 Онлайн-топ ›</button> <button class="name-btn ${!d.playerName && d.bestScore > 0 ? 'call' : ''}" id="name-btn">${d.playerName ? '✎ ' + d.playerName : (d.bestScore > 0 ? '🏆 в топ!' : '＋ имя')}</button></div>
+          <div id="rivals-list">${this._rivalsPlaceholder(d)}</div>
+        </div>
+        <div class="stats-row">
+          <span>🦴 ${d.cookies.toLocaleString('ru')}<label>печеньки</label></span>
+          <span>🏵 ${d.tokens || 0}<label>жетоны</label></span>
+          <span>🏆 ${d.bestScore.toLocaleString('ru')}<label>рекорд</label></span>
+          <span>📏 ${d.bestDistance.toLocaleString('ru')} м<label>дистанция</label></span>
+        </div>
+        <a class="diary-link" id="diary-link" href="https://vk.com/chloe.myaussie" target="_blank" rel="noopener">🐾 Дневник Хлои <span class="vk">ВКонтакте ›</span></a>
+      </div>`;
+    this._showVersion();
+    track('menu_shown', {});
+    this.menuEl.querySelector('#start-btn').addEventListener('click', onStart);
+    this.menuEl.querySelector('#diary-link').addEventListener('click', () => track('diary_click', { from: 'menu' }));
+    // Кнопка имени игрока
+    const nameBtn = this.menuEl.querySelector('#name-btn');
+    if (nameBtn) nameBtn.addEventListener('click', async () => {
+      const cur = this.meta.data.playerName || '';
+      const hadName = !!cur;
+      const name = (window.prompt('Ник для онлайн-лидерборда (до 24 симв.):', cur) || '').slice(0, 24).trim();
+      if (!name) return;
+      this.meta.setPlayerName(name);
+      // Перенос накопленного рекорда в глобальный топ (при первом вводе ника)
+      const best = this.meta.data.bestScore || 0;
+      if (best > 0 && (!hadName || !this.meta.data.recordSubmitted)) {
+        const r = await submitScore(name, best, this.meta.data.bestDistance || 0);
+        if (r && r.rank) {
+          this.meta.data.recordSubmitted = true; this.meta.save();
+          this.showOnlineRank(r.rank);
+        }
+      }
+      this.showMenu(this._onStart, this._onSelectDog);
+    });
+    // Асинхронно подгружаем реальный онлайн-топ (fallback — локальные боты уже показаны)
+    this._loadOnlineTop();
+    const lbOpen = this.menuEl.querySelector('#lb-open');
+    if (lbOpen) lbOpen.addEventListener('click', () => this.showFullLeaderboard('all'));
+    const giftBtn = this.menuEl.querySelector('#gift-btn');
+    if (giftBtn) {
+      giftBtn.addEventListener('click', () => {
+        const amount = this.meta.claimGift();
+        if (amount > 0) {
+          const row = this.menuEl.querySelector('#gift-row');
+          row.innerHTML = `<span class="gift-won">🎉 +${amount} 🦴!</span>`;
+          // Обновляем счётчик печенек в статистике
+          setTimeout(() => this.showMenu(this._onStart, this._onSelectDog), 1400);
+        }
+      });
+    }
+    this._onStart = onStart;
+    this._onSelectDog = onSelectDog;
+    for (const card of this.menuEl.querySelectorAll('.dog-card')) {
+      card.addEventListener('click', () => {
+        onSelectDog(card.dataset.dog);
+        this.showMenu(onStart, onSelectDog); // перерисовать
+      });
+    }
+  }
+
+  // Первичный контент онлайн-секции до ответа сервера: честный «загрузка» + свой рекорд.
+  // НЕ показываем локальных ботов — раньше они (score = мой_рекорд × k) всегда «обгоняли»
+  // игрока и у каждого клиента были свои, из-за чего топ выглядел рассинхронным.
+  _rivalsPlaceholder(d) {
+    const me = this._esc(d.playerName || 'ТЫ');
+    const mine = d.bestScore > 0
+      ? `<div class="rival me"><span>🐕 ${me}</span><span>${d.bestScore.toLocaleString('ru')}</span></div>` : '';
+    return `<div class="rival loading"><span>⏳ Загрузка топа…</span><span></span></div>${mine}`;
+  }
+
+  async _loadOnlineTop(attempt = 0) {
+    // Поколение: отбрасываем устаревшие ответы, если меню за время fetch перерисовалось.
+    const gen = (this._topGen = (this._topGen || 0) + 1);
+    const top = await fetchTop('all', 8);
+    if (gen !== this._topGen) return; // меню пересоздано/закрыто — этот ответ уже неактуален
+    const list = document.getElementById('rivals-list');
+    if (!list) return; // игрок ушёл из меню — прекращаем
+    const me = this.meta.data.playerName;
+    if (!top || !top.length) {
+      // Офлайн/пусто — честно, без фейковых ботов. Показываем только свой рекорд.
+      // Частая причина недоступности — заграничный VPN (сервер в РФ): трафик режется.
+      let html = '<div class="rival offline"><span>⚠ Топ недоступен (VPN/нет связи)</span><span></span></div>';
+      if (this.meta.data.bestScore > 0) {
+        html += `<div class="rival me"><span>🐕 ${this._esc(me || 'ТЫ')}</span><span>${this.meta.data.bestScore.toLocaleString('ru')}</span></div>`;
+      }
+      list.innerHTML = html;
+      // Авто-ретрай, пока игрок в меню: несколько попыток + мгновенно при возврате сети.
+      // Так реальный топ подтянется сам, когда интернет/VPN «отпустит», без перезахода.
+      if (attempt < 4) {
+        clearTimeout(this._topRetryT);
+        this._topRetryT = setTimeout(() => this._loadOnlineTop(attempt + 1), 4000 + attempt * 4000);
+      }
+      if (!this._onlineHandler) {
+        this._onlineHandler = () => this._loadOnlineTop(0);
+        window.addEventListener('online', this._onlineHandler);
+      }
+      return;
+    }
+    clearTimeout(this._topRetryT); // успех — гасим отложенные ретраи
+    const withMe = top.some(r => r.name === me);
+    const rows = top.slice(0, withMe ? 8 : 7);
+    let html = rows.map((r, i) =>
+      `<div class="rival ${r.name === me ? 'me' : ''}"><span>${i + 1}. ${r.name === me ? '🐕 ' : '🐶 '}${this._esc(r.name)}</span><span>${(r.score || 0).toLocaleString('ru')}</span></div>`).join('');
+    if (!withMe && this.meta.data.bestScore > 0) {
+      html += `<div class="rival me"><span>🐕 ${this._esc(me || 'ТЫ')}</span><span>${this.meta.data.bestScore.toLocaleString('ru')}</span></div>`;
+    }
+    list.innerHTML = html; // list уже получена и проверена выше
+  }
+
+  async showFullLeaderboard(period = 'all') {
+    const el = document.getElementById('leaderboard');
+    el.style.display = 'flex';
+    const me = this.meta.data.playerName;
+    const tabs = [['all', 'Всё время'], ['week', 'Неделя'], ['day', 'Сегодня']];
+    el.innerHTML = `
+      <div class="lb-card">
+        <div class="lb-title">🏅 Онлайн-лидерборд</div>
+        <div class="lb-tabs">${tabs.map(([p, t]) => `<button class="lb-tab ${p === period ? 'on' : ''}" data-p="${p}">${t}</button>`).join('')}</div>
+        <div class="lb-list" id="lb-list"><div class="lb-loading">Загрузка…</div></div>
+        <button class="menu-btn" id="lb-close">Закрыть</button>
+      </div>`;
+    el.querySelector('#lb-close').addEventListener('click', () => { el.style.display = 'none'; el.innerHTML = ''; });
+    for (const b of el.querySelectorAll('.lb-tab')) b.addEventListener('click', () => this.showFullLeaderboard(b.dataset.p));
+    const top = await fetchTop(period, 100);
+    const list = document.getElementById('lb-list');
+    if (!list) return;
+    if (!top || !top.length) { list.innerHTML = '<div class="lb-loading">Пока пусто — стань первым!</div>'; return; }
+    const myIdx = top.findIndex(r => r.name === me);
+    list.innerHTML = top.map((r, i) => `
+      <div class="lb-row ${r.name === me ? 'me' : ''} ${i < 3 ? 'medal' : ''}">
+        <span class="lb-rank">${['🥇','🥈','🥉'][i] || (i + 1)}</span>
+        <span class="lb-name">${r.name === me ? '🐕 ' : ''}${this._esc(r.name)}</span>
+        <span class="lb-score">${(r.score || 0).toLocaleString('ru')}</span>
+        <span class="lb-dist">${(r.distance || 0).toLocaleString('ru')} м</span>
+      </div>`).join('') +
+      (myIdx < 0 && this.meta.data.bestScore > 0 ? `<div class="lb-row me"><span class="lb-rank">—</span><span class="lb-name">🐕 ${this._esc(me || 'ТЫ')}</span><span class="lb-score">${this.meta.data.bestScore.toLocaleString('ru')}</span><span class="lb-dist">${(this.meta.data.bestDistance||0).toLocaleString('ru')} м</span></div>` : '');
+  }
+
+  _esc(s) { return String(s).replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c])); }
+
+  showOnlineRank(rank) {
+    // Короткий тост о месте в мировом топе
+    while (this.missionToast.children.length >= 2) this.missionToast.firstChild.remove();
+    const el = document.createElement('div');
+    el.className = 'mission-complete';
+    el.innerHTML = `🏅 Твоё место в онлайн-топе: <b>#${rank}</b>`;
+    this.missionToast.appendChild(el);
+    setTimeout(() => el.remove(), 4000);
+  }
+
+  hideMenu() {
+    this.menuEl.style.display = 'none';
+    this.hud.style.display = 'block';
+    // Гасим отложенные ретраи онлайн-топа и снимаем слушатель сети — иначе утекают
+    // и пишут в уже несуществующий DOM, а поколение (_topGen) отбрасывает поздние ответы.
+    this._topGen = (this._topGen || 0) + 1;
+    clearTimeout(this._topRetryT);
+    this._topRetryT = null;
+    if (this._onlineHandler) {
+      window.removeEventListener('online', this._onlineHandler);
+      this._onlineHandler = null;
+    }
+  }
+
+  _showVersion() {
+    const el = document.getElementById('version-badge');
+    if (!el) return;
+    el.innerHTML = `<span>${APP_VERSION}</span> <button id="force-update" title="Сбросить кэш и загрузить свежую версию">⟳ обновить</button>`;
+    const btn = document.getElementById('force-update');
+    if (btn) btn.onclick = async () => {
+      btn.textContent = '⟳ …';
+      try {
+        if ('caches' in window) { const ks = await caches.keys(); await Promise.all(ks.map(k => caches.delete(k))); }
+        if (navigator.serviceWorker) { const rs = await navigator.serviceWorker.getRegistrations(); await Promise.all(rs.map(r => r.unregister())); }
+      } catch (e) {}
+      // Уходим на URL с параметром — обходит HTTP-кэш index.html
+      location.href = location.pathname + '?fresh=' + Date.now();
+    };
+  }
+
+  showPause(onResume, onQuit) {
+    const el = document.getElementById('pause');
+    el.style.display = 'flex';
+    el.innerHTML = `
+      <div class="pause-card">
+        <div class="pause-head">ПАУЗА</div>
+        <button class="start-btn" id="pause-resume">ПРОДОЛЖИТЬ</button>
+        <button class="menu-btn" id="pause-quit">В МЕНЮ</button>
+      </div>`;
+    el.querySelector('#pause-resume').addEventListener('click', onResume);
+    el.querySelector('#pause-quit').addEventListener('click', onQuit);
+  }
+
+  hidePause() {
+    const el = document.getElementById('pause');
+    el.style.display = 'none';
+    el.innerHTML = '';
+  }
+
+  async countdown() {
+    this.countdownEl.style.display = 'flex';
+    for (const t of ['3', '2', '1', 'ГОУ!']) {
+      this.countdownEl.innerHTML = `<div class="count-num">${t}</div>`;
+      await new Promise(r => setTimeout(r, t === 'ГОУ!' ? 500 : 650));
+    }
+    this.countdownEl.style.display = 'none';
+  }
+
+  // Мгновенный вариант для харнесса
+  countdownInstant() { this.countdownEl.style.display = 'none'; }
+
+  // «Судья прощает?» — оффер revive с тающим таймером
+  showRevive(price, tokens, onAccept, onDecline) {
+    const el = document.getElementById('revive');
+    el.style.display = 'flex';
+    el.innerHTML = `
+      <div class="revive-card">
+        <div class="revive-head">Судья готов простить фолт</div>
+        <div class="revive-timer"><i id="revive-fill"></i></div>
+        <button class="start-btn" id="revive-yes">ПРОДОЛЖИТЬ — ${price} 🏵</button>
+        <div class="revive-tokens">у тебя: ${tokens} 🏵</div>
+        <button class="menu-btn" id="revive-no">Сдаться</button>
+      </div>`;
+    el.querySelector('#revive-yes').addEventListener('click', onAccept);
+    el.querySelector('#revive-no').addEventListener('click', onDecline);
+  }
+
+  updateReviveTimer(k) {
+    const f = document.getElementById('revive-fill');
+    if (f) f.style.width = Math.round(k * 100) + '%';
+  }
+
+  hideRevive() {
+    const el = document.getElementById('revive');
+    el.style.display = 'none';
+    el.innerHTML = '';
+  }
+
+  // Обучение «за руку» (первая сессия): при подходе к новому снаряду игра замедляется,
+  // а поверх экрана большая белая полупрозрачная ЛАПА делает жест (dir: up|down|side|tap) —
+  // как ghost-hand в Subway Surfers, без текста. На десктопе — капсула нужной клавиши.
+  showTutHint(name, dir, label, isTouch) {
+    const el = document.getElementById('tut-hint');
+    if (!el) return;
+    el.innerHTML = isTouch
+      ? `<img class="th-paw th-${dir}" src="./assets/paw-hint.png" alt="">`
+      : `<div class="th-keys th-${dir}">${this._esc(label)}</div>`;
+    el.style.display = 'flex';
+  }
+
+  hideTutHint() {
+    const el = document.getElementById('tut-hint');
+    if (el) { el.style.display = 'none'; el.innerHTML = ''; }
+  }
+
+  setRecordMode(on) {
+    this.scoreEl.classList.toggle('gold', !!on);
+  }
+
+  updateHUD(state) {
+    // Счёт тикает к фактическому
+    this._displayScore += (state.score - this._displayScore) * 0.2;
+    if (Math.abs(state.score - this._displayScore) < 2) this._displayScore = state.score;
+    this.scoreEl.textContent = Math.floor(this._displayScore).toLocaleString('ru');
+    this.cookieEl.textContent = '🦴 ' + state.cookies;
+    const tokEl = document.getElementById('tokens');
+    if (tokEl) {
+      tokEl.style.display = state.tokens > 0 ? 'block' : 'none';
+      tokEl.textContent = '🏵 ' + state.tokens;
+    }
+    const multEl = document.getElementById('mult');
+    if (multEl) {
+      multEl.style.display = state.metaMult > 1 ? 'block' : 'none';
+      multEl.textContent = '×' + state.metaMult;
+    }
+    if (state.combo > 1) {
+      this.comboEl.style.display = 'block';
+      this.comboEl.querySelector('.combo-num').textContent = '×' + state.combo;
+      this.comboFill.style.width = Math.min(100, state.comboFresh * 100) + '%';
+      this.comboEl.classList.toggle('hot', state.combo >= 10);
+    } else {
+      this.comboEl.style.display = 'none';
+    }
+    // Пауэрапы с таймерами
+    let html = '';
+    for (const [k, v] of Object.entries(state.powerups)) {
+      if (v > 0) {
+        const icons = { magnet: '🧲', shield: '🛡', rocket: '🥏', multi: '✨' };
+        html += `<div class="pw"><span>${icons[k]}</span><i style="width:${Math.min(100, v / state.powerupMax[k] * 100)}%"></i></div>`;
+      }
+    }
+    this.powerupsEl.innerHTML = html;
+    // Виньетка опасности (судья рядом)
+    this.vignette.style.opacity = state.danger ? 0.5 : 0;
+    this.speedlines.style.opacity = state.boost ? 0.6 : 0;
+  }
+
+  // Летящая к счётчику косточка + панч счётчика
+  flyCookie(from) {
+    const el = document.createElement('div');
+    el.className = 'fly-bone';
+    el.textContent = '🦴';
+    el.style.left = from.x + '%';
+    el.style.top = from.y + '%';
+    document.body.appendChild(el);
+    const target = this.cookieEl.getBoundingClientRect();
+    requestAnimationFrame(() => {
+      el.style.left = (target.left + target.width * 0.2) + 'px';
+      el.style.top = target.top + 'px';
+      el.style.opacity = '0.15';
+      el.style.transform = 'scale(0.5)';
+    });
+    setTimeout(() => {
+      el.remove();
+      this.cookieEl.classList.remove('punch');
+      void this.cookieEl.offsetWidth;
+      this.cookieEl.classList.add('punch');
+    }, 380);
+  }
+
+  scorePunch() {
+    this.scoreEl.classList.remove('punch');
+    void this.scoreEl.offsetWidth;
+    this.scoreEl.classList.add('punch');
+  }
+
+  flash(color = 'rgba(255,255,255,0.5)') {
+    this.flashEl.style.background = color;
+    this.flashEl.style.opacity = 1;
+    setTimeout(() => { this.flashEl.style.opacity = 0; }, 60);
+  }
+
+  missionComplete(def) {
+    // Не больше двух плашек одновременно — старые убираем
+    while (this.missionToast.children.length >= 2) this.missionToast.firstChild.remove();
+    const el = document.createElement('div');
+    el.className = 'mission-complete';
+    el.innerHTML = `🎯 Миссия выполнена!<br>${def.text} <b>+${def.reward}🦴</b>`;
+    this.missionToast.appendChild(el);
+    setTimeout(() => el.remove(), 3500);
+  }
+
+  rewardFlight(count, fromEl) {
+    // Облако DOM-косточек рассыпается у карточки и летит к счётчику баланса
+    const target = fromEl || this.overEl.querySelector('.over-head');
+    if (!target) return;
+    const tr = target.getBoundingClientRect();
+    const n = Math.min(18, Math.max(6, Math.round(count / 20)));
+    const cx = tr.left + tr.width / 2, cy = tr.top + tr.height + 20;
+    for (let i = 0; i < n; i++) {
+      const el = document.createElement('div');
+      el.className = 'fly-bone';
+      el.textContent = '🦴';
+      (this._flyBones = this._flyBones || []).push(el);
+      const ang = (i / n) * Math.PI * 2, r = 30 + Math.random() * 40;
+      el.style.left = (cx + Math.cos(ang) * r) + 'px';
+      el.style.top = (cy + Math.sin(ang) * r * 0.6) + 'px';
+      document.body.appendChild(el);
+      // Пауза-зависание, потом полёт к цели со стаггером
+      setTimeout(() => {
+        const bal = this.overEl.querySelector('.reward-target');
+        const bt = bal ? bal.getBoundingClientRect() : { left: cx, top: cy };
+        el.style.left = bt.left + 'px';
+        el.style.top = bt.top + 'px';
+        el.style.opacity = '0.1';
+        el.style.transform = 'scale(0.4)';
+      }, 250 + i * 35);
+      setTimeout(() => { el.remove(); const k = this._flyBones?.indexOf(el); if (k >= 0) this._flyBones.splice(k, 1); }, 250 + i * 35 + 450);
+    }
+  }
+
+  showGameOver(runStats, completedMissions, meta, onRestart, onMenu) {
+    this.hud.style.display = 'none';
+    this.hidePause();
+    this.overEl.style.display = 'flex';
+    const title = meta.title();
+    const isRecord = runStats.score >= meta.data.bestScore && runStats.score > 0;
+    const missions = meta.activeMissions();
+    const missionRows = missions.map(m => {
+      const cur = Math.min(Math.floor(runStats[m.stat] || 0), m.target);
+      const doneNow = completedMissions.some(c => c.id === m.id);
+      const pc = doneNow ? 100 : Math.floor(cur / m.target * 100);
+      return `<div class="over-mission-row ${doneNow ? 'done' : ''}">
+        <div class="mission-line">${doneNow ? '✅' : '🎯'} ${m.text} <span>${doneNow ? `+${m.reward}🦴` : `${cur} / ${m.target}`}</span></div>
+        <div class="mission-bar"><i style="width:${pc}%"></i></div>
+      </div>`;
+    }).join('');
+    const doneRows = completedMissions
+      .filter(c => !missions.some(m => m.id === c.id))
+      .map(c => `<div class="over-mission-row done"><div class="mission-line">✅ ${c.text} <span>+${c.reward}🦴</span></div></div>`)
+      .join('');
+    this.overEl.innerHTML = `
+      <div class="over-card">
+        <div class="over-head">${isRecord ? '🏆 НОВЫЙ РЕКОРД!' : 'ФИНИШ'}</div>
+        <div class="rosette-big">${rosetteSVG(title.current.color, 62)}</div>
+        <div class="over-score">${runStats.score.toLocaleString('ru')}</div>
+        <div class="over-grid">
+          <div><b>${Math.floor(runStats.distance)}</b> м</div>
+          <div><b>×${runStats.maxCombo}</b> макс. комбо</div>
+          <div><b>${runStats.perfects}</b> ${plural(runStats.perfects, ['перфект', 'перфекта', 'перфектов'])}</div>
+          <div><b>${runStats.cleanObstacles}</b> ${plural(runStats.cleanObstacles, ['снаряд', 'снаряда', 'снарядов'])}</div>
+          <div><b>${runStats.faults}</b> ${plural(runStats.faults, ['фолт', 'фолта', 'фолтов'])}</div>
+          <div class="reward-target"><b>+${runStats.cookies}</b> 🦴 в копилку</div>
+        </div>
+        ${(!isRecord && meta.data.bestDistance > 0 && runStats.distance < meta.data.bestDistance)
+          ? `<div class="near-miss">До рекорда дистанции не хватило <b>${Math.ceil(meta.data.bestDistance - runStats.distance)} м</b>
+             <div class="mission-bar"><i style="width:${Math.floor(runStats.distance / meta.data.bestDistance * 100)}%"></i></div></div>`
+          : ''}
+        <div class="over-missions">${doneRows}${missionRows}</div>
+        <div class="title-row">
+          <span class="rosette">${rosetteSVG(title.current.color, 34)}</span>
+          <div>
+            <div class="title-name">${title.current.name}</div>
+            <div class="title-bar"><i style="width:${Math.floor(title.progress * 100)}%"></i></div>
+            ${title.next
+              ? `<div class="title-next">${meta.data.totalScore.toLocaleString('ru')} / ${title.next.need.toLocaleString('ru')} · до «${title.next.gen}» осталось ${(title.next.need - meta.data.totalScore).toLocaleString('ru')}</div>`
+              : '<div class="title-next">Максимальный титул!</div>'}
+          </div>
+        </div>
+        <div class="over-btns">
+          <button class="start-btn" id="again-btn">ЕЩЁ ЗАБЕГ</button>
+          <button class="menu-btn" id="menu-btn">МЕНЮ</button>
+        </div>
+        <a class="diary-link" id="diary-link" href="https://vk.com/chloe.myaussie" target="_blank" rel="noopener">🐾 Понравилось? Хлоя ведёт дневник <span class="vk">ВКонтакте ›</span></a>
+      </div>`;
+    this.overEl.querySelector('#again-btn').addEventListener('click', onRestart);
+    this.overEl.querySelector('#menu-btn').addEventListener('click', onMenu);
+    this.overEl.querySelector('#diary-link').addEventListener('click', () => track('diary_click', { from: 'gameover' }));
+    if (runStats.cookies > 0) setTimeout(() => this.rewardFlight(runStats.cookies), 500);
+  }
+
+  hideGameOver() {
+    this.overEl.style.display = 'none';
+    for (const el of (this._flyBones || [])) el.remove();
+    this._flyBones = [];
+  }
+}

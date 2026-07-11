@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Agility Rush — аджилити-раннер</title>
+<script>
+  // Bootstrap-версия: index.html грузится всегда свежим (network-first / без SW),
+  // поэтому знает актуальную сборку. Если у игрока в кэше старьё — один раз чистим
+  // все кэши, разрегистрируем старый SW и перезагружаемся. Разрывает «залипание» SW.
+  window.__BUILD = 'staging-v1';
+  window.__CACHE = 'agility-staging-v1'; // должно совпадать с VERSION в sw.js
+  (function () {
+    try {
+      var qs = new URLSearchParams(location.search);
+      if (qs.has('harness')) return;
+      // Явный сброс: ?fresh или ?v=... — чистим всё и уходим на чистый URL
+      var forced = qs.has('fresh') || qs.has('v');
+      if (forced && !sessionStorage.getItem('__busted')) {
+        sessionStorage.setItem('__busted', '1');
+        var wipe = [];
+        if ('caches' in window) wipe.push(caches.keys().then(function (ks) { return Promise.all(ks.map(function (k) { return caches.delete(k); })); }));
+        if (navigator.serviceWorker) wipe.push(navigator.serviceWorker.getRegistrations().then(function (rs) { return Promise.all(rs.map(function (r) { return r.unregister(); })); }));
+        Promise.all(wipe).then(function () { location.replace(location.pathname); }).catch(function () { location.replace(location.pathname); });
+        return;
+      }
+      if (sessionStorage.getItem('__busted')) return; // защита от цикла в этой сессии
+      if (!('caches' in window)) return;
+      caches.keys().then(function (ks) {
+        // Устаревший кэш — любой agility-rush-* кроме текущего. Ловит залипших с 1-го захода.
+        var stale = ks.filter(function (k) { return k.indexOf('agility-staging') === 0 && k !== window.__CACHE; });
+        if (!stale.length) return;
+        sessionStorage.setItem('__busted', '1');
+        var jobs = ks.map(function (k) { return caches.delete(k); });
+        if (navigator.serviceWorker) {
+          jobs.push(navigator.serviceWorker.getRegistrations().then(function (rs) {
+            return Promise.all(rs.map(function (r) { return r.unregister(); }));
+          }));
+        }
+        Promise.all(jobs).then(function () { location.reload(); }).catch(function () { location.reload(); });
+      }).catch(function () {});
+    } catch (e) {}
+  })();
+</script>
+<link rel="manifest" href="./manifest.webmanifest">
+<meta name="theme-color" content="#0d1522">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Agility Rush">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="apple-touch-icon" href="./assets/icon-180.png">
+<link rel="icon" type="image/png" href="./assets/icon-180.png">
+<meta name="description" content="Бесконечный чемпионат по аджилити. Беги за собакой, проходи снаряды и бей рекорды в онлайн-топе!">
+<!-- Open Graph / соцсети (предпросмотр ссылки в мессенджерах) -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Agility Rush">
+<meta property="og:title" content="Agility Rush — собачий раннер">
+<meta property="og:description" content="Бесконечный чемпионат по аджилити. Беги за собакой, проходи снаряды и бей рекорды в онлайн-топе!">
+<meta property="og:url" content="https://allgrit.github.io/agility-rush/">
+<meta property="og:image" content="https://allgrit.github.io/agility-rush/assets/og-image.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:locale" content="ru_RU">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Agility Rush — собачий раннер">
+<meta name="twitter:description" content="Беги за собакой, проходи снаряды аджилити и бей рекорды в онлайн-топе!">
+<meta name="twitter:image" content="https://allgrit.github.io/agility-rush/assets/og-image.jpg">
+<style>
+  :root {
+    --accent: #ffb347;
+    --blue: #4a9ad8;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0d1522; }
+  body { font-family: 'Segoe UI', 'Arial', sans-serif; -webkit-user-select: none; user-select: none; touch-action: none; }
+  #menu, #gameover { touch-action: auto; }
+  #game-canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+
+  #ui { position: fixed; inset: 0; pointer-events: none; }
+  #ui button { pointer-events: auto; }
+  /* Меню и результаты интерактивны целиком: скролл колесом/тачем обязан работать */
+  #menu, #gameover { pointer-events: auto; }
+
+  /* HUD */
+  #hud { display: none; }
+  #score {
+    position: absolute; top: 14px; right: 18px;
+    font-size: 34px; font-weight: 800; color: #fff;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.55), 0 0 22px rgba(255,179,71,0.25);
+    font-variant-numeric: tabular-nums;
+    transition: transform 0.1s;
+  }
+  #score.punch { animation: punch 0.22s ease-out; }
+  #score.gold { color: #ffd75a; text-shadow: 0 2px 8px rgba(0,0,0,0.55), 0 0 26px rgba(255,200,60,0.6); }
+  #mult {
+    display: none; position: absolute; top: 16px; right: 150px;
+    font-size: 20px; font-weight: 900; color: #9adcff;
+    background: rgba(20,34,58,0.75); border: 1px solid rgba(154,220,255,0.4);
+    border-radius: 10px; padding: 3px 9px;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+  }
+  #pause-btn {
+    position: absolute; top: 14px; left: 14px; pointer-events: auto;
+    width: 40px; height: 40px; border-radius: 12px;
+    background: rgba(20,34,58,0.7); border: 1px solid rgba(255,255,255,0.18);
+    color: #c8d6ec; font-size: 16px; cursor: pointer;
+  }
+  #pause-btn:active { transform: scale(0.92); }
+  #pause {
+    position: fixed; inset: 0; display: none; z-index: 30;
+    align-items: center; justify-content: center;
+    background: rgba(8,12,24,0.65); pointer-events: auto;
+  }
+  .pause-card {
+    width: min(300px, 88vw); background: rgba(14,22,38,0.95);
+    border: 1px solid rgba(255,255,255,0.12); border-radius: 20px;
+    padding: 24px; text-align: center; display: flex; flex-direction: column; gap: 12px;
+    box-shadow: 0 20px 70px rgba(0,0,0,0.6);
+  }
+  .pause-head { color: #fff; font-size: 26px; font-weight: 900; letter-spacing: 3px; margin-bottom: 6px; }
+  #tokens {
+    position: absolute; top: 86px; right: 18px;
+    font-size: 16px; font-weight: 700; color: #ffd75a;
+    text-shadow: 0 2px 6px rgba(0,0,0,0.6);
+  }
+  #revive {
+    position: fixed; inset: 0; display: none; z-index: 30;
+    align-items: center; justify-content: center;
+    background: rgba(8,12,24,0.55); pointer-events: auto;
+  }
+  .revive-card {
+    width: min(340px, 90vw); background: rgba(14,22,38,0.95);
+    border: 2px solid rgba(255,213,135,0.5); border-radius: 20px;
+    padding: 20px 24px; text-align: center;
+    box-shadow: 0 20px 70px rgba(0,0,0,0.6);
+  }
+  .revive-head { color: #ffd587; font-size: 18px; font-weight: 800; margin-bottom: 12px; }
+  .revive-timer { height: 8px; background: rgba(255,255,255,0.12); border-radius: 4px; margin-bottom: 14px; overflow: hidden; }
+  .revive-timer i { display: block; height: 100%; width: 100%; background: linear-gradient(90deg, #ffd587, #f08a2c); border-radius: 4px; }
+  .revive-tokens { color: #9db4d4; font-size: 12.5px; margin: 10px 0; }
+  .daily-row {
+    display: flex; justify-content: space-between; align-items: center;
+    background: rgba(154,220,255,0.08); border: 1px solid rgba(154,220,255,0.25);
+    border-radius: 10px; padding: 7px 11px; font-size: 12.5px; color: #c8e4f5; margin: 8px 0 6px;
+  }
+  .daily-row b { letter-spacing: 2px; color: #9adcff; }
+  .daily-row.done { border-color: rgba(127,224,86,0.4); background: rgba(127,224,86,0.08); }
+  .gift-row { margin: 6px 0; }
+  .gift-btn {
+    width: 100%; background: linear-gradient(180deg, #7fe056, #4aba6a); border: none;
+    border-radius: 12px; color: #123312; font-size: 14px; font-weight: 800;
+    padding: 9px; cursor: pointer; font-family: inherit;
+    animation: giftpulse 1.6s ease-in-out infinite;
+  }
+  @keyframes giftpulse { 50% { transform: scale(1.03); box-shadow: 0 0 18px rgba(127,224,86,0.5); } }
+  .gift-wait { display: block; text-align: center; color: #7a8cab; font-size: 12px; padding: 6px; }
+  .gift-won { display: block; text-align: center; color: #7fe056; font-size: 16px; font-weight: 800; padding: 6px; }
+  .rivals { text-align: left; margin: 6px 0; display: flex; flex-direction: column; gap: 3px; }
+  .rival {
+    display: flex; justify-content: space-between; font-size: 12px; color: #9db4d4;
+    padding: 4px 10px; border-radius: 8px; background: rgba(255,255,255,0.03);
+  }
+  .rivals-head { display: flex; justify-content: space-between; align-items: center; font-size: 11.5px; color: #9db4d4; margin-bottom: 4px; }
+  .lb-open { background: none; border: none; color: #9adcff; font-size: 12px; font-weight: 700; cursor: pointer; font-family: inherit; padding: 0; }
+  .lb-open:hover { color: #cfeeff; }
+  #leaderboard {
+    position: fixed; inset: 0; display: none; z-index: 40; pointer-events: auto;
+    align-items: center; justify-content: center; background: rgba(8,12,24,0.72);
+  }
+  /* Обучение — большая белая полупрозрачная лапа-жест поверх экрана (стиль Subway Surfers).
+     Одна лапа делает понятное движение: вверх/вниз/вбок/тап-в-ритм. Без текста и карточек. */
+  #tut-hint {
+    position: fixed; inset: 0; display: none; z-index: 25;
+    align-items: center; justify-content: center; pointer-events: none;
+  }
+  .th-paw {
+    width: min(200px, 52vw); height: auto;
+    filter: brightness(0) invert(1) drop-shadow(0 4px 12px rgba(0,0,0,0.5));
+    opacity: 0.55; will-change: transform, opacity;
+  }
+  .th-up   { animation: pawup 1.2s ease-in-out infinite; }
+  .th-down { animation: pawdown 1.2s ease-in-out infinite; }
+  .th-side { animation: pawside 1.3s ease-in-out infinite; }
+  .th-tap  { animation: pawtap 1.1s ease-in-out infinite; }
+  @keyframes pawup   { 0%{transform:translateY(80px);opacity:0} 25%{opacity:.6} 70%{transform:translateY(-65px);opacity:.6} 100%{transform:translateY(-65px);opacity:0} }
+  @keyframes pawdown { 0%{transform:translateY(-80px) rotate(180deg);opacity:0} 25%{opacity:.6} 70%{transform:translateY(65px) rotate(180deg);opacity:.6} 100%{transform:translateY(65px) rotate(180deg);opacity:0} }
+  @keyframes pawside { 0%{transform:translateX(-95px) rotate(-90deg);opacity:.25} 50%{transform:translateX(95px) rotate(-90deg);opacity:.6} 100%{transform:translateX(-95px) rotate(-90deg);opacity:.25} }
+  @keyframes pawtap  {
+    0%{transform:translateX(-70px) scale(.8);opacity:.25} 15%{transform:translateX(-70px) scale(1.15);opacity:.65}
+    40%{transform:translateX(-70px) scale(.9);opacity:.3} 50%{transform:translateX(70px) scale(.8);opacity:.25}
+    65%{transform:translateX(70px) scale(1.15);opacity:.65} 90%{transform:translateX(70px) scale(.9);opacity:.3}
+    100%{transform:translateX(-70px) scale(.8);opacity:.25}
+  }
+  /* Десктоп играет клавишами — вместо жеста показываем капсулу нужной клавиши */
+  .th-keys {
+    font-size: 26px; font-weight: 900; color: #fff; padding: 10px 22px;
+    background: rgba(10,16,30,0.55); border: 2px solid rgba(255,255,255,0.7); border-radius: 14px;
+    animation: thkeypulse 0.8s ease-in-out infinite;
+  }
+  @keyframes thkeypulse { 50% { transform: scale(1.08); box-shadow: 0 0 22px rgba(255,255,255,0.4); } }
+  .lb-card {
+    width: min(440px, 94vw); max-height: 88vh; display: flex; flex-direction: column;
+    background: rgba(14,22,38,0.97); border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 20px; padding: 18px 18px 16px; box-shadow: 0 24px 80px rgba(0,0,0,0.6);
+  }
+  .lb-title { color: #ffd587; font-size: 20px; font-weight: 900; text-align: center; margin-bottom: 10px; }
+  .lb-tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+  .lb-tab { flex: 1; background: rgba(255,255,255,0.06); border: none; color: #9db4d4; border-radius: 10px; padding: 7px; font-size: 12.5px; font-weight: 700; cursor: pointer; font-family: inherit; }
+  .lb-tab.on { background: rgba(255,179,71,0.18); color: #ffd587; }
+  .lb-list { overflow-y: auto; flex: 1; margin-bottom: 12px; scrollbar-width: thin; }
+  .lb-loading { text-align: center; color: #7a8cab; padding: 30px; font-size: 13px; }
+  .lb-row { display: grid; grid-template-columns: 34px 1fr auto auto; gap: 8px; align-items: center; padding: 7px 8px; border-radius: 9px; font-size: 13px; color: #c8d6ec; }
+  .lb-row:nth-child(even) { background: rgba(255,255,255,0.03); }
+  .lb-row.medal { background: rgba(255,213,135,0.06); }
+  .lb-row.me { background: rgba(255,179,71,0.16); color: #ffd587; font-weight: 800; border: 1px solid rgba(255,179,71,0.4); }
+  .lb-rank { text-align: center; font-weight: 800; }
+  .lb-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lb-score { font-variant-numeric: tabular-nums; font-weight: 700; }
+  .lb-dist { color: #8ea4c4; font-size: 11px; font-variant-numeric: tabular-nums; }
+  .lb-row.me .lb-dist { color: #ffd587; }
+  .name-btn {
+    background: rgba(255,179,71,0.15); border: 1px solid rgba(255,179,71,0.4); color: #ffd587;
+    border-radius: 8px; padding: 2px 8px; font-size: 11px; cursor: pointer; font-family: inherit;
+  }
+  .name-btn.call {
+    background: linear-gradient(180deg, #ffb347, #f08a2c); color: #3a2408; font-weight: 800;
+    border-color: transparent; animation: giftpulse 1.6s ease-in-out infinite;
+  }
+  .rival.me { background: rgba(255,179,71,0.14); color: #ffd587; font-weight: 800; border: 1px solid rgba(255,179,71,0.35); }
+  .recovered-row {
+    background: rgba(127,224,86,0.12); border: 1px solid rgba(127,224,86,0.4);
+    border-radius: 10px; padding: 7px 11px; font-size: 12px; color: #d7f5c8; margin-bottom: 8px; text-align: center;
+  }
+  .recovered-row b { color: #ffd587; }
+  .near-miss {
+    background: rgba(255,179,71,0.1); border: 1px solid rgba(255,179,71,0.35);
+    border-radius: 10px; padding: 8px 12px; font-size: 13px; color: #ffd587; margin-bottom: 8px;
+  }
+  @keyframes punch { 30% { transform: scale(1.22); color: var(--accent); } }
+  #cookies {
+    position: absolute; top: 56px; right: 18px;
+    font-size: 19px; font-weight: 700; color: #ffd587;
+    text-shadow: 0 2px 6px rgba(0,0,0,0.6);
+  }
+  #combo {
+    display: none;
+    position: absolute; top: 14px; left: 62px;
+    color: #fff; text-shadow: 0 2px 8px rgba(0,0,0,0.6);
+  }
+  #combo .combo-num { font-size: 30px; font-weight: 800; }
+  #combo.hot .combo-num { color: #ff9a3d; text-shadow: 0 0 18px rgba(255,120,40,0.8); }
+  #combo-bar { width: 110px; height: 7px; background: rgba(255,255,255,0.2); border-radius: 4px; margin-top: 4px; overflow: hidden; }
+  #combo-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #ffd587, #ff9a3d); border-radius: 4px; transition: width 0.15s; }
+  #powerups { position: absolute; top: 92px; left: 62px; display: flex; flex-direction: column; gap: 6px; }
+  #powerups .pw { display: flex; align-items: center; gap: 6px; font-size: 20px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5)); }
+  #powerups .pw i { display: block; width: 60px; height: 5px; background: linear-gradient(90deg, #9adcff, #4a9ad8); border-radius: 3px; }
+
+  /* Попапы наград */
+  #popups { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
+  .popup {
+    position: absolute; transform: translate(-50%, -50%);
+    font-weight: 900; white-space: nowrap;
+    animation: popfly 1.4s ease-out forwards;
+    text-shadow: 0 3px 10px rgba(0,0,0,0.5);
+  }
+  @keyframes popfly {
+    0% { opacity: 0; transform: translate(-50%, -30%) scale(0.4); }
+    12% { opacity: 1; transform: translate(-50%, -50%) scale(1.25); }
+    22% { transform: translate(-50%, -50%) scale(1); }
+    70% { opacity: 1; }
+    100% { opacity: 0; transform: translate(-50%, -160%) scale(0.9); }
+  }
+  .popup.perfect { font-size: 44px; color: #ffe08a; -webkit-text-stroke: 1.5px #b8681f; letter-spacing: 2px; }
+  .popup.clean { font-size: 30px; color: #9adcff; }
+  .popup.fault { font-size: 30px; color: #ff7a6e; }
+  .popup.combo { font-size: 36px; color: #ffb347; }
+  .popup.scorepop { font-size: 30px; color: #ffd75a; -webkit-text-stroke: 1px #7a4a12; text-shadow: 0 3px 12px rgba(0,0,0,0.65); }
+  .popup.miss { font-size: 16px; color: #ffb0a8; }
+
+  .fly-bone {
+    position: fixed; z-index: 40; pointer-events: none;
+    font-size: 20px; opacity: 0.95; transform: translate(-50%, -50%);
+    transition: left 0.38s cubic-bezier(0.3, 0.6, 0.4, 1), top 0.38s cubic-bezier(0.2, 0.4, 0.3, 1), opacity 0.38s, transform 0.38s;
+    filter: drop-shadow(0 0 6px rgba(255,214,135,0.8));
+  }
+  #cookies.punch { animation: punch 0.25s ease-out; }
+
+  /* Виньетка и спидлайны */
+  #vignette {
+    position: fixed; inset: 0; pointer-events: none; opacity: 0;
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(200,30,30,0.45) 100%);
+    transition: opacity 0.4s;
+  }
+  #speedlines {
+    position: fixed; inset: 0; pointer-events: none; opacity: 0;
+    background:
+      linear-gradient(90deg, rgba(255,255,255,0.14) 0%, transparent 12%, transparent 88%, rgba(255,255,255,0.14) 100%);
+    transition: opacity 0.3s;
+  }
+  #flash { position: fixed; inset: 0; pointer-events: none; opacity: 0; transition: opacity 0.25s; }
+
+  /* Countdown */
+  #countdown {
+    position: fixed; inset: 0; display: none;
+    align-items: center; justify-content: center; pointer-events: none;
+  }
+  .count-num {
+    font-size: 120px; font-weight: 900; color: #fff;
+    text-shadow: 0 6px 30px rgba(0,0,0,0.5), 0 0 40px rgba(255,179,71,0.5);
+    animation: countpop 0.6s ease-out;
+  }
+  @keyframes countpop { 0% { transform: scale(2.2); opacity: 0; } 40% { transform: scale(1); opacity: 1; } }
+
+  /* Меню */
+  #menu {
+    position: fixed; inset: 0; display: none;
+    align-items: center; justify-content: center;
+    background: linear-gradient(180deg, rgba(10,18,34,0.25), rgba(10,18,34,0.65));
+  }
+  .menu-card {
+    width: min(480px, 94vw); max-height: 96vh; overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    background: rgba(14,22,38,0.88); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 22px; padding: 16px 22px; text-align: center;
+    box-shadow: 0 24px 80px rgba(0,0,0,0.5);
+    backdrop-filter: blur(6px);
+    scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.3) transparent;
+  }
+  .menu-card::-webkit-scrollbar { width: 6px; }
+  .menu-card::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.25); border-radius: 3px; }
+  .hero { position: relative; margin: -16px -22px 10px; border-radius: 20px 20px 0 0; overflow: hidden; }
+  .hero img { display: block; width: 100%; height: 148px; object-fit: cover; object-position: center 30%; }
+  .hero-title {
+    position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: flex-end;
+    padding: 10px 14px; background: linear-gradient(180deg, transparent 35%, rgba(10,16,30,0.88));
+  }
+  .menu-card h1 { font-size: 32px; font-weight: 900; color: #fff; letter-spacing: 1px; text-shadow: 0 2px 12px rgba(0,0,0,0.7); }
+  .menu-card h1 span { color: var(--accent); }
+  .subtitle { color: #c8d6ec; font-size: 12.5px; margin-bottom: 2px; text-shadow: 0 1px 6px rgba(0,0,0,0.7); }
+  .title-row { display: flex; gap: 10px; align-items: center; text-align: left; background: rgba(255,255,255,0.05); padding: 8px 12px; border-radius: 14px; margin-bottom: 10px; }
+  .title-row .rosette { font-size: 30px; }
+  .title-row > div { flex: 1; }
+  .title-name { color: #ffd587; font-weight: 700; font-size: 15px; }
+  .title-bar { height: 6px; background: rgba(255,255,255,0.12); border-radius: 3px; margin: 5px 0 3px; }
+  .title-bar i { display: block; height: 100%; background: linear-gradient(90deg, #ffd587, #ff9a3d); border-radius: 3px; }
+  .title-next { color: #7a8cab; font-size: 11.5px; }
+  .dogs-row { display: flex; gap: 8px; margin-bottom: 10px; }
+  .dog-card {
+    flex: 1; background: rgba(255,255,255,0.06); border: 2px solid transparent;
+    border-radius: 14px; padding: 8px 5px; cursor: pointer; transition: all 0.15s;
+    color: #fff; font-family: inherit;
+  }
+  .dog-card:hover { background: rgba(255,255,255,0.12); transform: translateY(-2px); }
+  .dog-card.sel { border-color: var(--accent); background: rgba(255,179,71,0.12); }
+  .dog-card.locked { opacity: 0.55; }
+  .dog-emoji { height: 56px; display: flex; align-items: center; justify-content: center; }
+  .dog-emoji img { width: 54px; height: 54px; object-fit: contain; filter: drop-shadow(0 3px 6px rgba(0,0,0,0.45)); }
+  .dog-name { font-size: 13px; font-weight: 700; margin-top: 4px; }
+  .dog-perk { font-size: 11px; color: #9db4d4; margin-top: 2px; }
+  .missions { text-align: left; margin: 10px 0; display: flex; flex-direction: column; gap: 5px; }
+  .mission { background: rgba(255,255,255,0.05); border-radius: 10px; padding: 6px 10px; font-size: 12.5px; color: #c8d6ec; }
+  .mission .mission-line { display: flex; justify-content: space-between; }
+  .mission span { color: #ffd587; font-weight: 700; }
+  .mission.done { opacity: 0.45; text-decoration: line-through; }
+  .mission-bar { height: 4px; background: rgba(255,255,255,0.12); border-radius: 2px; margin-top: 5px; }
+  .mission-bar i { display: block; height: 100%; background: linear-gradient(90deg, #7fe056, #4aba6a); border-radius: 2px; }
+  .mission-best { font-size: 10.5px; color: #7a8cab; margin-top: 3px; }
+  .dog-price { font-size: 10.5px; color: #8ea4c4; margin-top: 4px; background: rgba(0,0,0,0.25); border-radius: 8px; padding: 3px 4px; }
+  .dog-price.can { color: #ffd587; }
+  .stats-row { display: flex; justify-content: space-around; color: #9db4d4; font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+  .stats-row label { display: block; font-size: 10px; color: #6d80a0; font-weight: 400; margin-top: 2px; }
+  .rosette svg { display: block; }
+  .over-missions { text-align: left; margin: 4px 0 12px; display: flex; flex-direction: column; gap: 6px; }
+  .over-mission-row { background: rgba(255,255,255,0.05); border-radius: 10px; padding: 7px 11px; font-size: 12.5px; color: #c8d6ec; }
+  .over-mission-row .mission-line { display: flex; justify-content: space-between; }
+  .over-mission-row span { color: #ffd587; font-weight: 700; }
+  .over-mission-row.done { background: rgba(127,224,86,0.12); border: 1px solid rgba(127,224,86,0.4); }
+  .start-btn {
+    background: linear-gradient(180deg, #ffb347, #f08a2c); border: none; border-radius: 16px;
+    color: #3a2408; font-size: 20px; font-weight: 900; letter-spacing: 2px;
+    padding: 12px 54px; cursor: pointer; font-family: inherit;
+    box-shadow: 0 8px 24px rgba(240,138,44,0.4), inset 0 2px 0 rgba(255,255,255,0.4);
+    transition: transform 0.12s;
+  }
+  .start-btn:hover { transform: scale(1.05); }
+  .start-btn:active { transform: scale(0.97); }
+  .controls-hint { color: #6d80a0; font-size: 11.5px; margin-top: 8px; }
+  /* Ссылка на дневник Хлои во ВКонтакте */
+  .diary-link {
+    display: inline-flex; align-items: center; gap: 7px; text-decoration: none;
+    color: #cfe0ff; font-size: 12.5px; font-weight: 600;
+    background: rgba(90,143,255,0.14); border: 1px solid rgba(90,143,255,0.3);
+    border-radius: 12px; padding: 7px 14px; margin-top: 10px;
+    transition: transform 0.12s, background 0.2s;
+  }
+  .diary-link:hover { background: rgba(90,143,255,0.24); transform: translateY(-1px); }
+  .diary-link:active { transform: scale(0.97); }
+  .diary-link .vk { color: #7aa0ff; font-weight: 800; }
+  .menu-card .diary-link { margin-top: 4px; }
+  .over-card .diary-link { margin-top: 14px; }
+  #version-badge {
+    position: fixed; right: 8px; bottom: 6px; z-index: 60; pointer-events: auto;
+    color: rgba(200,214,236,0.5); font-size: 10px; letter-spacing: 0.5px;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.6);
+    display: flex; align-items: center; gap: 6px;
+  }
+  #force-update {
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
+    color: rgba(200,214,236,0.75); font-size: 10px; border-radius: 7px;
+    padding: 2px 7px; cursor: pointer; font-family: inherit;
+  }
+  #force-update:active { transform: scale(0.94); }
+
+  /* Game over */
+  #gameover {
+    position: fixed; inset: 0; display: none;
+    align-items: center; justify-content: center;
+    background: rgba(8,12,24,0.45);
+  }
+  .over-card {
+    width: min(420px, 94vw); max-height: 96vh; overflow: hidden;
+    background: rgba(14,22,38,0.92); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 22px; padding: 24px 28px; text-align: center;
+    box-shadow: 0 24px 80px rgba(0,0,0,0.6);
+    animation: cardIn 0.45s cubic-bezier(0.2, 1.4, 0.4, 1);
+  }
+  @keyframes cardIn { 0% { transform: translateY(60px) scale(0.9); opacity: 0; } }
+  .over-head { font-size: 24px; font-weight: 900; color: #ffd587; letter-spacing: 2px; }
+  .rosette-big { font-size: 56px; margin: 6px 0; animation: rosette 0.8s ease-out; }
+  @keyframes rosette { 0% { transform: scale(0) rotate(-180deg); } 60% { transform: scale(1.3) rotate(10deg); } }
+  .over-score { font-size: 46px; font-weight: 900; color: #fff; font-variant-numeric: tabular-nums; }
+  .over-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin: 16px 0; color: #9db4d4; font-size: 13px; }
+  .over-grid b { color: #fff; font-size: 17px; display: block; }
+  .over-mission { background: rgba(255,213,135,0.12); color: #ffd587; border-radius: 10px; padding: 7px; font-size: 13px; margin-bottom: 6px; }
+  .over-btns { display: flex; gap: 10px; justify-content: center; margin-top: 16px; }
+  .menu-btn {
+    background: rgba(255,255,255,0.1); border: none; border-radius: 16px;
+    color: #c8d6ec; font-size: 16px; font-weight: 700; padding: 14px 28px;
+    cursor: pointer; font-family: inherit;
+  }
+  .menu-btn:hover { background: rgba(255,255,255,0.18); }
+
+  /* Миссии-тосты */
+  #mission-toast { position: fixed; top: 90px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+  .mission-complete {
+    background: rgba(20,34,20,0.9); border: 1px solid #7fe056; color: #d7f5c8;
+    border-radius: 14px; padding: 10px 22px; font-size: 14px; text-align: center;
+    animation: toastIn 0.4s ease-out;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+  }
+  .mission-complete b { color: #ffd587; }
+  @keyframes toastIn { 0% { transform: translateY(-24px); opacity: 0; } }
+
+  /* --- Адаптация: на невысоких экранах КОМПАКТИМ (не прячем функциональность!).
+     Весь контент доступен через аккуратный скролл карточки. Лидерборд, регистрация
+     ника, слово дня — видны на любом экране. --- */
+  @media (max-height: 820px) {
+    .hero img { height: 108px; }
+    .recovered-row { font-size: 11px; padding: 5px 9px; }
+    .menu-card h1 { font-size: 26px; }
+    .menu-card, .over-card { padding: 12px 16px; }
+    .hero { margin: -12px -16px 8px; }
+    .mission-best { display: none; }
+    .missions { gap: 4px; margin: 8px 0; }
+    .mission { padding: 5px 9px; font-size: 11.5px; }
+    .dog-emoji { height: 44px; }
+    .dog-emoji img { width: 42px; height: 42px; }
+    .rivals .rival:nth-child(n+4) { display: none; }
+    .rosette-big { font-size: 40px; margin: 2px 0; }
+    .rosette-big svg { width: 44px; height: 44px; }
+    .over-score { font-size: 34px; }
+    .over-grid { margin: 8px 0; gap: 5px; font-size: 12px; }
+  }
+  @media (max-height: 640px) {
+    .hero { display: none; }
+    .menu-card::before { content: 'AGILITY RUSH'; display: block; font-size: 22px; font-weight: 900; color: #fff; letter-spacing: 1px; margin-bottom: 8px; }
+    .title-next { display: none; }
+    .controls-hint { display: none; }
+    .stats-row label { display: none; }
+    .over-missions { display: none; }
+    .start-btn { padding: 10px 44px; font-size: 17px; }
+    .rivals .rival:nth-child(n+3) { display: none; }
+  }
+  @media (max-width: 420px) {
+    .menu-card h1 { font-size: 24px; }
+    .dog-perk { font-size: 9.5px; }
+    .dog-name { font-size: 11.5px; }
+    #score { font-size: 27px; top: 10px; right: 12px; }
+    #cookies { font-size: 16px; top: 44px; right: 12px; }
+    #combo .combo-num { font-size: 24px; }
+    .popup.perfect { font-size: 34px; }
+    .popup.clean, .popup.fault { font-size: 24px; }
+    .popup.scorepop { font-size: 24px; }
+  }
+
+  #update-banner {
+    position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
+    display: none; z-index: 50; pointer-events: auto;
+    background: rgba(20,34,58,0.96); border: 1px solid rgba(255,179,71,0.5);
+    border-radius: 14px; padding: 10px 14px; color: #ffd587; font-size: 13px;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+  }
+  #update-banner button {
+    margin-left: 10px; background: linear-gradient(180deg, #ffb347, #f08a2c); border: none;
+    border-radius: 9px; color: #3a2408; font-weight: 800; padding: 5px 14px; cursor: pointer; font-family: inherit;
+  }
+
+  body.harness #countdown { display: none !important; }
+  /* В harness-режиме CSS-анимации не тикают (headless) — показываем попапы статично */
+  body.harness .popup, body.harness .mission-complete, body.harness .over-card, body.harness .count-num, body.harness .rosette-big {
+    animation: none !important; opacity: 1 !important;
+  }
+  body.harness .popup { transform: translate(-50%, -50%) scale(1); }
+</style>
+</head>
+<body>
+  <canvas id="game-canvas"></canvas>
+  <div id="vignette"></div>
+  <div id="speedlines"></div>
+  <div id="flash"></div>
+  <div id="version-badge"></div>
+  <div id="ui">
+    <div id="hud">
+      <div id="score">0</div>
+      <div id="mult">×1</div>
+      <div id="cookies">🦴 0</div>
+      <div id="tokens" style="display:none">🏵 0</div>
+      <button id="pause-btn" aria-label="Пауза">⏸</button>
+      <div id="combo">
+        <div class="combo-num">×2</div>
+        <div id="combo-bar"><div id="combo-fill"></div></div>
+      </div>
+      <div id="powerups"></div>
+    </div>
+    <div id="menu"></div>
+    <div id="gameover"></div>
+    <div id="countdown"></div>
+    <div id="revive"></div>
+    <div id="pause"></div>
+    <div id="leaderboard"></div>
+    <div id="tut-hint"></div>
+    <div id="update-banner">Доступно обновление игры <button id="update-apply">Обновить</button></div>
+    <div id="mission-toast"></div>
+  </div>
+  <div id="popups"></div>
+  <script type="importmap">
+    { "imports": {
+      "three": "./vendor/three/build/three.module.js",
+      "three/addons/": "./vendor/three/examples/jsm/"
+    } }
+  </script>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
