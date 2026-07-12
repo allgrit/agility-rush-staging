@@ -3,7 +3,7 @@
 // по мере запроса). Новая версия НЕ применяется на лету — старые вкладки доигрывают
 // на своём коде, обновление активируется контролируемо по клику игрока (skipWaiting).
 
-const VERSION = 'agility-staging-v1';
+const VERSION = 'agility-staging-v2';
 const CORE = [
   './',
   './index.html',
@@ -11,8 +11,10 @@ const CORE = [
   './src/main.js', './src/game.js', './src/world.js', './src/track.js',
   './src/obstacles.js', './src/dog.js', './src/fx.js', './src/camera_rig.js',
   './src/audio.js', './src/ui.js', './src/meta.js', './src/rng.js', './src/leaderboard.js', './src/version.js', './src/analytics.js',
+  './src/cosmetics.js', './src/rigged_dog.js',
   './assets/hero.png', './assets/dog-border.png', './assets/dog-aussie.png', './assets/dog-poodle.png',
   './assets/icon-180.png', './assets/icon-512.png',
+  './assets/models/border-collie-test.glb',
   // Three.js и bloom-цепочка — чтобы игра открывалась офлайн с первого захода
   './vendor/three/build/three.module.js',
   './vendor/three/examples/jsm/postprocessing/EffectComposer.js',
@@ -25,6 +27,9 @@ const CORE = [
   './vendor/three/examples/jsm/shaders/CopyShader.js',
   './vendor/three/examples/jsm/shaders/LuminosityHighPassShader.js',
   './vendor/three/examples/jsm/shaders/OutputShader.js',
+  './vendor/three/examples/jsm/loaders/GLTFLoader.js',
+  './vendor/three/examples/jsm/utils/BufferGeometryUtils.js',
+  './vendor/three/examples/jsm/utils/SkeletonUtils.js',
 ];
 
 self.addEventListener('install', (e) => {
@@ -81,4 +86,4 @@ self.addEventListener('fetch', (e) => {
     || p.includes('/src/') || p.endsWith('.webmanifest');
   e.respondWith(isOwnCode ? networkFirst(req) : cacheFirst(req));
 });
-// v4: skipWaiting + network-first свой код + отложенный reload у клиента (обновление у всех)
+// staging v6: rigged-бордер, косметика и необходимые glTF runtime-файлы в precache.

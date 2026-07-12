@@ -7,12 +7,15 @@ import { Game, FIXED_DT } from './game.js';
 
 // Bootstrap: рендерер, цикл с аккумулятором, ввод, харнесс для покадровой съёмки.
 
+const params = new URLSearchParams(location.search);
+const HARNESS = params.has('harness');
+
 const canvas = document.getElementById('game-canvas');
 const renderer = new THREE.WebGLRenderer({
   canvas, antialias: true,
   // preserveDrawingBuffer нужен только харнессу (toDataURL). В проде он удваивает буфер и
   // лишне грузит память мобильного GPU — включаем ТОЛЬКО в харнессе.
-  preserveDrawingBuffer: new URLSearchParams(location.search).has('harness'),
+  preserveDrawingBuffer: HARNESS,
 });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
@@ -55,6 +58,24 @@ window.__diag = { glLostCount: 0, webgl: (() => {
   } catch { return null; }
 })() };
 
+// Экспериментальная модель доступна только локально и в отдельном staging Pages.
+// Production-host даже с ручным ?riggedDog=1 остаётся на процедурной собаке.
+const isLocal = location.hostname === '127.0.0.1' || location.hostname === 'localhost';
+const isStaging = location.hostname === 'allgrit.github.io'
+  && location.pathname.startsWith('/agility-rush-staging/');
+const wantsRiggedDog = params.get('riggedDog') === '1' && (isLocal || isStaging);
+
+let dogFactory = null;
+if (wantsRiggedDog) {
+  try {
+    const { loadRiggedDogFactory } = await import('./rigged_dog.js');
+    dogFactory = await loadRiggedDogFactory('./assets/models/border-collie-test.glb');
+  } catch (error) {
+    window.__diag.riggedDogError = String(error?.message || error);
+  }
+}
+window.__diag.riggedDogEnabled = !!dogFactory;
+
 // Баннер «графика перезапустилась» — вместо тихого чёрного экрана даём игроку выход.
 function showGlLostBanner() {
   let b = document.getElementById('gl-lost');
@@ -89,7 +110,7 @@ canvas.addEventListener('webglcontextrestored', () => {
   if (!HARNESS) import('./analytics.js').then(({ track }) => track('webgl_context_restored', { count: window.__diag.glLostCount })).catch(() => {});
 }, false);
 
-const game = new Game(renderer, scene, camera);
+const game = new Game(renderer, scene, camera, { dogFactory });
 
 // Аналитика: загрузка игры (device, время до готовности)
 if (!new URLSearchParams(location.search).has('harness')) {
@@ -167,8 +188,6 @@ window.addEventListener('touchend', (e) => {
 }, { passive: true });
 
 // --- Основной цикл ---
-const params = new URLSearchParams(location.search);
-const HARNESS = params.has('harness');
 let accumulator = 0;
 let lastT = performance.now();
 let running = true;

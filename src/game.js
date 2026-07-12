@@ -16,6 +16,13 @@ export const FIXED_DT = 1 / 60;
 const JUMP_V = 5.4, GRAVITY = 15, FAST_FALL = -11;
 const BASE_SPEED = 12, MAX_SPEED = 26;
 
+function disposeObject(object) {
+  if (object.geometry) object.geometry.dispose();
+  if (!object.material) return;
+  const materials = Array.isArray(object.material) ? object.material : [object.material];
+  materials.forEach(material => material?.dispose());
+}
+
 // Обучение «за руку» (первая сессия): нужный жест по типу снаряда. При подходе к новому
 // снаряду игра замедляется и показывается визуальный жест (анимированный «ghost hand»
 // в направлении dir) + короткая подпись. dir: up|down|side|tap. text — touch/key адаптивно.
@@ -39,7 +46,7 @@ const TUT_MAX_SHOWS = 5; // сколько раз максимум показа�
 const SCORE_CLEAN = 100, SCORE_PERFECT_MULT = 2, SCORE_TABLE = 300, SCORE_COOKIE = 10;
 
 export class Game {
-  constructor(renderer, scene, camera) {
+  constructor(renderer, scene, camera, options = {}) {
     this.renderer = renderer;
     this.scene = scene;
     this.camera = camera;
@@ -53,6 +60,7 @@ export class Game {
     this.world = new World(scene, this.rng, renderer);
     this.track = new Track(scene, this.rng);
     this.fx = new Fx(scene);
+    this.dogFactory = options.dogFactory || null;
     this.dogModel = null;
     this.judge = buildJudge();
     this.judge.visible = false;
@@ -84,9 +92,15 @@ export class Game {
   _setDog(breed) {
     if (this.dogModel) {
       this.scene.remove(this.dogModel.root);
-      this.dogModel.root.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) { const m = Array.isArray(o.material) ? o.material : [o.material]; m.forEach(x => x && x.dispose()); } });
+      if (typeof this.dogModel.dispose === 'function') this.dogModel.dispose();
+      else this.dogModel.root.traverse(disposeObject);
     }
-    this.dogModel = new Dog(breed, this.meta.cosmeticEquip());
+    const equip = this.meta.cosmeticEquip();
+    // Тестовый GLB пока представляет только бордер-колли. Другие породы должны
+    // сохранять собственный силуэт, perk и hitbox даже при включённом URL-флаге.
+    this.dogModel = this.dogFactory && breed === 'border'
+      ? this.dogFactory(breed, equip)
+      : new Dog(breed, equip);
     this.scene.add(this.dogModel.root);
     this.breed = breed;
   }
@@ -96,7 +110,7 @@ export class Game {
       lane: 1, x: 0, y: 0, vy: 0, z: 0,
       airborne: false, jumpStart: 0, jumpElapsed: 0,
       slideT: 0, speed: 0, gallopPhase: 0, footPhase: 0,
-      stumbleInvulnT: 0, stunT: 0, launchedT: 0, launchSpin: 0, landT: 0, coyoteT: 0, jumpBufferT: 0,
+      stumbleInvulnT: 0, stumbleAnimT: 0, stunT: 0, launchedT: 0, launchSpin: 0, landT: 0, coyoteT: 0, jumpBufferT: 0,
       deadT: 0, mode: 'idle', shakeT: 999,
     };
     this._judgeAnimT = 0;
@@ -334,11 +348,12 @@ export class Game {
 
     // Таймеры
     if (d.stumbleInvulnT > 0) d.stumbleInvulnT -= dt;
+    if (d.stumbleAnimT > 0) d.stumbleAnimT = Math.max(0, d.stumbleAnimT - dt);
     if (d.landT > 0) d.landT -= dt;
     if (d.coyoteT > 0) d.coyoteT -= dt;
     if (d.jumpBufferT > 0) d.jumpBufferT -= dt;
     if (this.inputRecentSlide > 0) this.inputRecentSlide -= dt;
-    if (d.slideT > 0) d.slideT -= dt;
+    if (d.slideT > 0) d.slideT = Math.max(0, d.slideT - dt);
     if (this.tableBoostT > 0) this.tableBoostT -= dt;
     if (this.cookieStreakT > 0) { this.cookieStreakT -= dt; } else this.cookieStreak = 0;
     for (const k of Object.keys(this.powerups)) {
@@ -486,20 +501,31 @@ export class Game {
 
   _dogPose() {
     const d = this.dog;
-    let mode = 'run';
+    const extended = !!this.dogModel.isRiggedDog;
+    let mode;
     if (this.flyT > 0) mode = 'fly';
     else if (d.launchedT > 0) mode = 'launched';
     else if (this.tableT > 0) mode = 'sit';
-    else if (d.airborne) mode = 'jump';
-    else if (d.slideT > 0 || (this.tunnelIn)) mode = 'slide';
+    else if (extended && d.stumbleAnimT > 0) mode = 'stumble';
+    else if (this.tunnelIn) mode = extended ? 'tunnel' : 'slide';
+    else if (d.slideT > 0) mode = 'slide';
+    else if (d.airborne) mode = extended && d.jumpElapsed <= 0.2 ? 'takeoff' : 'jump';
+    else if (extended && d.landT > 0) mode = 'landing';
     else if (this.weave) mode = 'weave';
     else if (this.onApparatus && (this.onApparatus.kind === 'dogwalk' || this.onApparatus.kind === 'seesaw')) mode = 'balance';
+    else if (extended && d.speed < 0.4) mode = 'idle';
+    else if (extended && d.speed < 4.5) mode = 'walk';
+    else if (extended && d.speed < 8.5) mode = 'trot';
+    else mode = 'run';
     const jumpDur = 2 * JUMP_V / GRAVITY;
     return {
       mode,
       phase: d.gallopPhase,
       speed: d.speed,
       jumpT: d.airborne ? Math.min(1, d.jumpElapsed / jumpDur) : 0,
+      takeoffT: d.airborne ? Math.min(1, d.jumpElapsed / 0.2) : 0,
+      landingT: d.landT > 0 ? 1 - Math.min(1, d.landT / 0.18) : 0,
+      stumbleT: d.stumbleAnimT > 0 ? 1 - Math.min(1, d.stumbleAnimT / 0.7) : 0,
       vy: d.vy,
       lean: THREE.MathUtils.clamp((LANE_X[d.lane] - d.x) * 0.4, -0.5, 0.5),
       weaveLean: this.weave ? -Math.sin((this.weave.entry - d.z) / this.weave.spacing * Math.PI) * 0.42 : 0,
@@ -1254,6 +1280,7 @@ export class Game {
       }
     }
     d.stumbleInvulnT = 1.3;
+    d.stumbleAnimT = 0.7;
     d.stunT = 0.7;
     this.judgeT = 11;
     this.rig.shake(0.09);
