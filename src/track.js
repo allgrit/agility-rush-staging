@@ -11,6 +11,20 @@ import {
 
 const CHUNK = 34; // метров на чанк
 
+// Освобождение GPU-ресурсов снаряда при рециклинге. Каждый снаряд билдится с уникальными
+// geometry/material (см. obstacles.js), поэтому dispose безопасен и обязателен — иначе на
+// долгом забеге GPU-память течёт и WebGL-контекст теряется («чёрный экран»).
+function disposeGroup(group) {
+  if (!group) return;
+  group.traverse((o) => {
+    if (o.geometry) o.geometry.dispose();
+    if (o.material) {
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      for (const m of mats) { if (m && m.map) m.map.dispose(); if (m) m.dispose(); }
+    }
+  });
+}
+
 export class Track {
   constructor(scene, rng) {
     this.scene = scene;
@@ -23,7 +37,7 @@ export class Track {
   }
 
   reset() {
-    for (const e of this.entities) this.scene.remove(e.group);
+    for (const e of this.entities) { this.scene.remove(e.group); disposeGroup(e.group); }
     this.entities = [];
     this.nextSpawnZ = -30;
     this.chunkIndex = 0;
@@ -270,6 +284,7 @@ export class Track {
       const e = this.entities[i];
       if (e.z > dogZ + 18 || (e.exit != null && e.exit > dogZ + 18)) {
         this.scene.remove(e.group);
+        disposeGroup(e.group); // освобождаем GPU-память — иначе на долгом забеге контекст теряется
         this.entities.splice(i, 1);
       }
     }

@@ -2,6 +2,7 @@ import { DOG_SHOP, TITLES, plural } from './meta.js';
 import { fetchTop, submitScore } from './leaderboard.js';
 import { track } from './analytics.js';
 import { APP_VERSION } from './version.js';
+import { catalog, RARITY, priceOf } from './cosmetics.js';
 
 // Весь HUD и меню — DOM поверх канваса: чётче текст, дешевле анимации (CSS).
 
@@ -98,13 +99,19 @@ export class UI {
             <span>${daily.streak > 0 ? '🔥 ' + daily.streak : ''}</span>
           </div>`;
         })()}
+        ${(() => {
+          const dm = this.meta.activeDailyMissions();
+          return `<div class="daily-missions">${dm.map(m =>
+            `<div class="dmission ${m.done ? 'done' : ''}">⭐ ${m.text}<span>+${m.reward}🦴${m.done ? ' ✓' : ''}</span></div>`
+          ).join('')}</div>`;
+        })()}
         <div class="gift-row" id="gift-row">
           ${this.meta.giftReady()
             ? '<button class="gift-btn" id="gift-btn">🎁 Миска корма — забрать!</button>'
             : `<span class="gift-wait">🎁 Подарок через ${this.meta.giftCountdown()}</span>`}
         </div>
         <div class="rivals" id="rivals">
-          <div class="rivals-head"><button class="lb-open" id="lb-open">🏅 Онлайн-топ ›</button> <button class="name-btn ${!d.playerName && d.bestScore > 0 ? 'call' : ''}" id="name-btn">${d.playerName ? '✎ ' + d.playerName : (d.bestScore > 0 ? '🏆 в топ!' : '＋ имя')}</button></div>
+          <div class="rivals-head"><button class="lb-open" id="lb-open">🏅 Онлайн-топ ›</button> <button class="lb-open" id="shop-open">🛍 Магазин</button> <button class="name-btn ${!d.playerName && d.bestScore > 0 ? 'call' : ''}" id="name-btn">${d.playerName ? '✎ ' + d.playerName : (d.bestScore > 0 ? '🏆 в топ!' : '＋ имя')}</button></div>
           <div id="rivals-list">${this._rivalsPlaceholder(d)}</div>
         </div>
         <div class="stats-row">
@@ -142,6 +149,12 @@ export class UI {
     this._loadOnlineTop();
     const lbOpen = this.menuEl.querySelector('#lb-open');
     if (lbOpen) lbOpen.addEventListener('click', () => this.showFullLeaderboard('all'));
+    const shopOpen = this.menuEl.querySelector('#shop-open');
+    // При изменении косметики пересобираем меню (обновить баланс/превью собаки в фоне).
+    if (shopOpen) shopOpen.addEventListener('click', () => this.showShop(() => {
+      onSelectDog(this.meta.data.selectedDog); // пересоздать собаку с новой косметикой
+      this.showMenu(onStart, onSelectDog);
+    }));
     const giftBtn = this.menuEl.querySelector('#gift-btn');
     if (giftBtn) {
       giftBtn.addEventListener('click', () => {
@@ -244,6 +257,58 @@ export class UI {
 
   _esc(s) { return String(s).replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c])); }
 
+  // Магазин косметики (sink для косточек). onChange — применить/обновить (пересоздать собаку).
+  showShop(onChange) {
+    const el = document.getElementById('shop');
+    if (!el) return;
+    el.style.display = 'flex';
+    track('shop_open', {});
+    const swatch = (it) => '#' + (it.body != null ? it.body : it.color).toString(16).padStart(6, '0');
+    const render = () => {
+      const cat = catalog(), bal = this.meta.data.cookies || 0;
+      const equip = this.meta.data.cosmeticsEquip || {};
+      const itemHtml = (it) => {
+        const owned = this.meta.ownsCosmetic(it.slot, it.id);
+        const equipped = equip[it.slot] === it.id;
+        const afford = bal >= it.price;
+        const cls = equipped ? 'equipped' : (!owned && !afford ? 'locked' : '');
+        const status = equipped ? '✓ надето' : owned ? 'надеть' : (afford ? `${it.price.toLocaleString('ru')} 🦴` : `${it.price.toLocaleString('ru')} 🦴`);
+        const col = equipped ? '#7fe056' : owned ? '#9adcff' : (afford ? RARITY[it.rarity].color : '#8a6a6a');
+        return `<div class="shop-item ${cls}" data-slot="${it.slot}" data-id="${it.id}">
+          <div class="shop-sw" style="background:${swatch(it)}"></div>
+          <div class="shop-info"><div class="shop-name">${this._esc(it.name)}</div><div class="shop-meta" style="color:${col}">${status}</div></div>
+        </div>`;
+      };
+      const coats = cat.filter(i => i.slot === 'coat'), necks = cat.filter(i => i.slot === 'neck');
+      el.innerHTML = `<div class="shop-card">
+        <div class="shop-head"><span class="shop-title">🛍 Магазин</span><span class="shop-bal">🦴 ${bal.toLocaleString('ru')}</span></div>
+        <div class="shop-sec">🎨 Окрасы</div><div class="shop-grid">${coats.map(itemHtml).join('')}</div>
+        <div class="shop-sec">🧣 Банданы</div><div class="shop-grid">${necks.map(itemHtml).join('')}</div>
+        <button class="menu-btn shop-close" id="shop-close">Закрыть</button>
+      </div>`;
+      for (const node of el.querySelectorAll('.shop-item')) {
+        node.addEventListener('click', () => {
+          const { slot, id } = node.dataset;
+          if (this.meta.ownsCosmetic(slot, id)) {
+            this.meta.toggleCosmetic(slot, id);
+          } else if (this.meta.buyCosmetic(slot, id)) {
+            track('cosmetic_buy', { item: `${slot}:${id}`, price: priceOf(slot, id) });
+          } else {
+            node.animate([{ transform: 'translateX(-4px)' }, { transform: 'translateX(4px)' }, { transform: 'translateX(0)' }], { duration: 180 });
+            return; // не хватает косточек
+          }
+          if (onChange) onChange();
+          render();
+        });
+      }
+      el.querySelector('#shop-close').addEventListener('click', () => {
+        el.style.display = 'none'; el.innerHTML = '';
+        if (onChange) onChange();
+      });
+    };
+    render();
+  }
+
   showOnlineRank(rank) {
     // Короткий тост о месте в мировом топе
     while (this.missionToast.children.length >= 2) this.missionToast.firstChild.remove();
@@ -271,7 +336,7 @@ export class UI {
   _showVersion() {
     const el = document.getElementById('version-badge');
     if (!el) return;
-    el.innerHTML = `<span>${APP_VERSION}</span> <button id="force-update" title="Сбросить кэш и загрузить свежую версию">⟳ обновить</button>`;
+    el.innerHTML = `<span>${APP_VERSION}</span> <button id="force-update" title="Сбросить кэш и загрузить свежую версию">⟳ обновить</button> <button id="diag-btn" title="Отправить диагностику, если лидерборд или игра барахлят">🩺</button>`;
     const btn = document.getElementById('force-update');
     if (btn) btn.onclick = async () => {
       btn.textContent = '⟳ …';
@@ -281,6 +346,20 @@ export class UI {
       } catch (e) {}
       // Уходим на URL с параметром — обходит HTTP-кэш index.html
       location.href = location.pathname + '?fresh=' + Date.now();
+    };
+    const diag = document.getElementById('diag-btn');
+    if (diag) diag.onclick = async () => {
+      diag.textContent = '🩺 …';
+      try {
+        const { sendDiagnostics } = await import('./diag.js');
+        const r = await sendDiagnostics();
+        const verdict = r.problems.length ? 'Вероятная причина: ' + r.problems.join('; ') : 'Явных проблем не видно';
+        diag.textContent = '✓ отправлено';
+        window.alert('Спасибо! Диагностика отправлена нам на сервер.\n\n' + verdict);
+      } catch (e) {
+        diag.textContent = '🩺';
+        window.alert('Не удалось отправить диагностику: ' + String(e).slice(0, 80));
+      }
     };
   }
 

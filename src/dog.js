@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { COATS, NECKS } from './cosmetics.js';
 
 // Процедурные low-poly собаки трёх пород. Собака смотрит в -Z.
 // Вся анимация процедурная: game передаёт pose (mode/phase/jumpT/lean/vy),
@@ -60,9 +61,21 @@ class Spring {
 }
 
 export class Dog {
-  constructor(breedKey = 'border') {
+  constructor(breedKey = 'border', equip = {}) {
     this.breedKey = breedKey;
-    this.cfg = BREEDS[breedKey];
+    this.equip = equip || {};
+    // Косметический окрас переопределяет базовые цвета породы (силуэт сохраняется). Копируем
+    // cfg, чтобы не мутировать общий BREEDS. Чистая визуалка — на геймплей не влияет.
+    this.cfg = { ...BREEDS[breedKey] };
+    const coat = this.equip.coat && COATS[this.equip.coat];
+    if (coat) {
+      this.cfg.body = coat.body;
+      if (coat.accent != null) this.cfg.accent = coat.accent;
+      if (coat.white != null) this.cfg.white = coat.white;
+      // Реальные окрасы: мерль/соболь рендерятся мраморными пятнами своим цветом (patch).
+      this.cfg.merle = !!coat.merle;
+      this.cfg.patch = coat.patch;
+    }
     this.root = new THREE.Group(); // позиционируется игрой
     this.model = new THREE.Group(); // внутренние повороты/крены
     this.root.add(this.model);
@@ -114,9 +127,9 @@ export class Dog {
     spine.add(rump);
 
     if (c.merle) {
-      // Мраморные пятна мерля
-      const patchMat = mat(0x4a4f5c);
-      for (const [x, y, z, s] of [[0.1, 0.08, 0.05, 0.07], [-0.09, 0.1, -0.1, 0.06], [0.06, 0.05, 0.22, 0.05], [-0.1, 0.02, 0.15, 0.055]]) {
+      // Мраморные пятна мерля/соболя — цвет из окраса (patch), иначе стандартный серый.
+      const patchMat = mat(c.patch != null ? c.patch : 0x4a4f5c);
+      for (const [x, y, z, s] of [[0.1, 0.08, 0.05, 0.07], [-0.09, 0.1, -0.1, 0.06], [0.06, 0.05, 0.22, 0.05], [-0.1, 0.02, 0.15, 0.055], [0.08, 0.11, -0.18, 0.05], [-0.05, 0.06, 0.28, 0.045]]) {
         const p = new THREE.Mesh(new THREE.SphereGeometry(s, 8, 6), patchMat);
         p.position.set(x, y, z); p.scale.y = 0.5;
         spine.add(p);
@@ -149,6 +162,26 @@ export class Dog {
       collar.position.set(0, 0.0, -0.03);
       collar.scale.set(1, 0.8, 0.85);
       neck.add(collar);
+    }
+    // Косметика: бандана/платок на шее (low-poly треугольник в стиле игры).
+    const neckItem = this.equip.neck && NECKS[this.equip.neck];
+    if (neckItem) {
+      const band = new THREE.Group();
+      band.position.set(0, 0.02, -0.02);
+      const clothMat = mat(neckItem.color, 0.8);
+      // Обхват шеи — сплюснутое кольцо
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.085, 0.028, 6, 12), clothMat);
+      ring.rotation.x = Math.PI / 2 - 0.5;
+      ring.scale.set(1, 1, 0.6);
+      band.add(ring);
+      // Свисающий узел-треугольник спереди
+      const knot = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.12, 4), neckItem.tip != null ? mat(neckItem.tip, 0.8) : clothMat);
+      knot.position.set(0, -0.07, 0.06);
+      knot.rotation.x = 0.3;
+      band.add(knot);
+      band.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+      neck.add(band);
+      this.parts.bandana = band;
     }
 
     const head = new THREE.Group();

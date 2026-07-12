@@ -10,7 +10,9 @@ import { Game, FIXED_DT } from './game.js';
 const canvas = document.getElementById('game-canvas');
 const renderer = new THREE.WebGLRenderer({
   canvas, antialias: true,
-  preserveDrawingBuffer: true, // нужно харнессу для toDataURL
+  // preserveDrawingBuffer нужен только харнессу (toDataURL). В проде он удваивает буфер и
+  // лишне грузит память мобильного GPU — включаем ТОЛЬКО в харнессе.
+  preserveDrawingBuffer: new URLSearchParams(location.search).has('harness'),
 });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
@@ -43,9 +45,49 @@ function resize() {
 window.addEventListener('resize', resize);
 resize();
 
-// Восстановление после потери WebGL-контекста (слабые GPU/драйверы)
-canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); }, false);
-canvas.addEventListener('webglcontextrestored', () => { resize(); }, false);
+// Диагностика GPU: какой рендерер и сколько раз терялся контекст (главная гипотеза
+// «чёрного экрана» при долгом забеге — iOS убивает WebGL по памяти).
+window.__diag = { glLostCount: 0, webgl: (() => {
+  try {
+    const gl = renderer.getContext();
+    const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+    return dbg ? { vendor: gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL), renderer: gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) } : { renderer: 'n/a' };
+  } catch { return null; }
+})() };
+
+// Баннер «графика перезапустилась» — вместо тихого чёрного экрана даём игроку выход.
+function showGlLostBanner() {
+  let b = document.getElementById('gl-lost');
+  if (!b) {
+    b = document.createElement('div');
+    b.id = 'gl-lost';
+    b.style.cssText = 'position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;background:rgba(8,12,24,0.92);color:#eaf4ff;font-family:Segoe UI,sans-serif;text-align:center;padding:24px';
+    b.innerHTML = '<div><div style="font-size:38px">🐕‍🦺</div><div style="font-size:18px;font-weight:800;margin:12px 0 6px">Графика перезапускается…</div><div style="font-size:13px;color:#9db4d4;max-width:280px">Если экран остаётся чёрным — нажми «Перезагрузить». Твой прогресс сохранён.</div><button id="gl-reload" style="margin-top:16px;background:linear-gradient(180deg,#ffb347,#f0902c);border:none;border-radius:12px;color:#2a1800;font-size:15px;font-weight:800;padding:11px 22px;cursor:pointer">↻ Перезагрузить</button></div>';
+    document.body.appendChild(b);
+    b.querySelector('#gl-reload').onclick = () => location.reload();
+  }
+  b.style.display = 'flex';
+}
+function hideGlLostBanner() { const b = document.getElementById('gl-lost'); if (b) b.style.display = 'none'; }
+
+canvas.addEventListener('webglcontextlost', (e) => {
+  e.preventDefault(); // обязательно — иначе контекст не восстановится
+  window.__diag.glLostCount++;
+  if (game && game.state === 'running') { try { game.togglePause(); } catch { /* ignore */ } }
+  showGlLostBanner();
+  if (!HARNESS) import('./analytics.js').then(({ track }) => track('webgl_context_lost', {
+    distance_m: Math.floor((game && game.distance) || 0),
+    score: Math.floor((game && game.score) || 0),
+    state: game && game.state, count: window.__diag.glLostCount,
+    runtime_s: Math.round(performance.now() / 1000),
+    mem_mb: (performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : null),
+  })).catch(() => {});
+}, false);
+canvas.addEventListener('webglcontextrestored', () => {
+  resize(); // пересоздаём размеры буферов; three сам восстановит текстуры/материалы
+  hideGlLostBanner();
+  if (!HARNESS) import('./analytics.js').then(({ track }) => track('webgl_context_restored', { count: window.__diag.glLostCount })).catch(() => {});
+}, false);
 
 const game = new Game(renderer, scene, camera);
 

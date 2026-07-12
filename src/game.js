@@ -82,8 +82,11 @@ export class Game {
   }
 
   _setDog(breed) {
-    if (this.dogModel) this.scene.remove(this.dogModel.root);
-    this.dogModel = new Dog(breed);
+    if (this.dogModel) {
+      this.scene.remove(this.dogModel.root);
+      this.dogModel.root.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) { const m = Array.isArray(o.material) ? o.material : [o.material]; m.forEach(x => x && x.dispose()); } });
+    }
+    this.dogModel = new Dog(breed, this.meta.cosmeticEquip());
     this.scene.add(this.dogModel.root);
     this.breed = breed;
   }
