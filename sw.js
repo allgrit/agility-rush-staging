@@ -3,7 +3,7 @@
 // по мере запроса). Новая версия НЕ применяется на лету — старые вкладки доигрывают
 // на своём коде, обновление активируется контролируемо по клику игрока (skipWaiting).
 
-const VERSION = 'agility-staging-v4';
+const VERSION = 'agility-staging-v5';
 const CORE = [
   './',
   './index.html',
@@ -86,4 +86,4 @@ self.addEventListener('fetch', (e) => {
     || p.includes('/src/') || p.endsWith('.webmanifest');
   e.respondWith(isOwnCode ? networkFirst(req) : cacheFirst(req));
 });
-// staging v8: восстановление клиентов, застрявших на HTTP-кэше v5.
+// staging v9: production v16 UI + rigged-бордер + восстановление старого HTTP-кэша.

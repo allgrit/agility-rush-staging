@@ -188,6 +188,10 @@ window.addEventListener('touchend', (e) => {
 }, { passive: true });
 
 // --- Основной цикл ---
+// Debug: ?warp=<метры> — старт забега сразу в плотной зоне второй оси сложности (для просмотра).
+// ТОЛЬКО на localhost: в проде это чит-вектор (накрутка дистанции/лидерборда), поэтому отключено.
+const WARP = parseInt(params.get('warp') || '0', 10);
+if (WARP > 0 && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) game._warpDist = WARP;
 let accumulator = 0;
 let lastT = performance.now();
 let running = true;

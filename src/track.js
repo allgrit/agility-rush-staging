@@ -71,9 +71,17 @@ export class Track {
     const z = this.nextSpawnZ; // начало чанка (ближний к собаке край)
     const rng = this.rng;
     const idx = this.chunkIndex++;
-    const diff = Math.min(1, idx / 40); // 0..1 рост сложности
-    this.nextSpawnZ -= CHUNK;
-    this.sincePowerup += CHUNK;
+    const diff = Math.min(1, idx / 40); // 0..1 рост сложности (упирается в потолок на ~1360 м)
+    // Вторая ось сложности: продолжает расти ПОСЛЕ потолка первой (idx>40), мягко насыщаясь.
+    // Даёт «ещё один забег»: чанки плотнее, чаще связки снаряд→снаряд, больше вторичных помех.
+    // Скорость НЕ трогаем (остаётся честный потолок 26 м/с) — растёт только плотность/связность.
+    const hard = 1 - Math.exp(-Math.max(0, idx - 40) / 80); // 0..~1, ~0.5 к idx≈95 (~3.2 км)
+    // Плотность: после потолка чанк сжимается до ~26% (нижний предел gap честный для реакции на 26 м/с).
+    // advance — реальная длина чанка в метрах; ВСЕ pity-счётчики считают именно её, иначе после
+    // сжатия пауэрапы/буквы спавнились бы чаще задуманного (подрыв дефицита).
+    const advance = CHUNK * (1 - 0.26 * hard);
+    this.nextSpawnZ -= advance;
+    this.sincePowerup += advance;
 
     const lanes = [0, 1, 2];
     const mainLane = rng.int(0, 2);
@@ -229,6 +237,18 @@ export class Track {
     patterns[picked]();
     if (APPARATUS.includes(picked)) this.lastSeen[picked] = idx;
 
+    // Вторая ось: связка снаряд→снаряд без передышки. К главному снаряду (не стене/дыханию)
+    // цепляем лёгкий второй сразу за дальним краем чанка. Растёт с hard, ранняя игра не затронута.
+    if (APPARATUS.includes(picked) && rng.chance(hard * 0.55)) {
+      const lz = this.nextSpawnZ - 6; // впереди всего, что уже заспавнено в этом чанке
+      const link = rng.pick(['hurdle', 'tire', 'tunnel']);
+      const ll = rng.int(0, 2);
+      if (link === 'tunnel') this._add(buildTunnel(ll, lz));
+      else if (link === 'tire') { this._add(buildTire(ll, lz)); this._cookieArc(ll, lz); }
+      else { this._add(buildHurdle(ll, lz)); this._cookieArc(ll, lz); }
+      this.nextSpawnZ = Math.min(this.nextSpawnZ, lz - 14);
+    }
+
     // --- Жетон судьи: один за забег, после ~450 м ---
     if (!this.tokenSpawned && idx * CHUNK > 450 && rng.chance(0.25)) {
       this._add(buildToken(rng.int(0, 2), z - CHUNK + 8));
@@ -236,7 +256,7 @@ export class Track {
     }
 
     // --- Кость-буква слова дня: примерно раз в 300 м ---
-    this.sinceLetter += CHUNK;
+    this.sinceLetter += advance;
     if (this.sinceLetter > 300 && this.nextLetterFn) {
       const letter = this.nextLetterFn();
       if (letter) {
@@ -252,13 +272,13 @@ export class Track {
       this.sincePowerup = 0;
     }
 
-    // --- Плотность: вторичный элемент в свободной полосе ---
-    if (picked !== 'wall' && picked !== 'breather' && rng.chance(0.35 + diff * 0.3)) {
+    // --- Плотность: вторичный элемент в свободной полосе (усиливается второй осью hard) ---
+    if (picked !== 'wall' && picked !== 'breather' && rng.chance(0.35 + diff * 0.3 + hard * 0.2)) {
       const freeLane = (mainLane + 2) % 3;
       if (rng.chance(0.5)) this._add(buildHurdle(freeLane, z - CHUNK + 6));
       else this._cookieLine(freeLane, z - CHUNK + 8, 4);
     }
-    if (diff > 0.5 && rng.chance(0.35)) {
+    if (diff > 0.5 && rng.chance(0.3 + hard * 0.3)) {
       this._add(buildCone(rng.int(0, 2), z - CHUNK + 4, rng.float(-0.3, 0.3)));
     }
   }

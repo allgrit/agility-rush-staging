@@ -8,8 +8,8 @@
   // Bootstrap-версия: index.html грузится всегда свежим (network-first / без SW),
   // поэтому знает актуальную сборку. Если у игрока в кэше старьё — один раз чистим
   // все кэши, разрегистрируем старый SW и перезагружаемся. Разрывает «залипание» SW.
-  window.__BUILD = 'staging-v8-cache-recovery';
-  window.__CACHE = 'agility-staging-v4'; // должно совпадать с VERSION в sw.js
+  window.__BUILD = 'staging-v9-prod16-rigged';
+  window.__CACHE = 'agility-staging-v5'; // должно совпадать с VERSION в sw.js
   (function () {
     try {
       var qs = new URLSearchParams(location.search);
@@ -48,13 +48,11 @@
       var freshKey = '__fresh_' + window.__BUILD + '_' + freshToken;
       if (forced && !sessionStorage.getItem(freshKey)) {
         sessionStorage.setItem(freshKey, '1');
-        sessionStorage.removeItem('__busted'); // legacy-маркер v5 больше не блокирует сброс
-        // Тестовый флаг модели должен пережить очистку кэша staging.
-        var cleanUrl = location.pathname + (qs.get('riggedDog') === '1' ? '?riggedDog=1' : '');
+        sessionStorage.removeItem('__busted');
         var wipe = [refreshRuntime()];
         if ('caches' in window) wipe.push(caches.keys().then(function (ks) { return Promise.all(ks.map(function (k) { return caches.delete(k); })); }));
         if (navigator.serviceWorker) wipe.push(navigator.serviceWorker.getRegistrations().then(function (rs) { return Promise.all(rs.map(function (r) { return r.unregister(); })); }));
-        Promise.all(wipe).then(function () { location.replace(cleanUrl); }).catch(function () { location.replace(cleanUrl); });
+        Promise.all(wipe).then(function () { location.replace(location.pathname); }).catch(function () { location.replace(location.pathname); });
         return;
       }
       if (!('caches' in window)) return;
@@ -442,6 +440,30 @@
   .mission-best { font-size: 10.5px; color: #7a8cab; margin-top: 3px; }
   .dog-price { font-size: 10.5px; color: #8ea4c4; margin-top: 4px; background: rgba(0,0,0,0.25); border-radius: 8px; padding: 3px 4px; }
   .dog-price.can { color: #ffd587; }
+  /* Гибрид-меню (парадигма SS): tap-to-play + панели меты + нижняя навигация с бейджами (F8) */
+  .hero.tappable { cursor: pointer; }
+  .tap-hint { position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+    display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 800; letter-spacing: .5px;
+    color: #2a1a06; background: linear-gradient(180deg,#ffd58a,#ffb347); padding: 4px 12px; border-radius: 999px;
+    box-shadow: 0 3px 12px rgba(255,179,71,.55); animation: tapPulse 1.4s ease-in-out infinite; pointer-events: none; white-space: nowrap; }
+  @keyframes tapPulse { 50% { transform: translateX(-50%) scale(.94); opacity: .82; } }
+  .meta-panel { display: none; text-align: left; min-height: 90px; margin-top: 14px; }
+  .title-lvl { display: inline-block; margin-left: 6px; font-size: 10.5px; font-weight: 800; color: #2a1a06;
+    background: linear-gradient(180deg,#ffd58a,#ffb347); padding: 1px 7px; border-radius: 999px; vertical-align: middle; }
+  .meta-panel.on { display: block; animation: metaIn .18s ease; }
+  @keyframes metaIn { from { opacity: 0; transform: translateY(4px); } }
+  .meta-panel .missions { margin-top: 0; }
+  .menu-nav { display: flex; gap: 6px; margin: 10px -8px 0; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.09); }
+  .menu-nav button { flex: 1; position: relative; background: none; border: none; color: #7f93b4;
+    padding: 6px 2px 3px; font-family: inherit; cursor: pointer; transition: color .15s; }
+  .menu-nav button.on { color: #ffd587; }
+  .menu-nav button.on::before { content: ""; position: absolute; top: -9px; left: 24%; right: 24%; height: 3px;
+    background: var(--accent); border-radius: 0 0 3px 3px; }
+  .menu-nav .nic { font-size: 19px; display: block; line-height: 1; }
+  .menu-nav .nlb { font-size: 10px; font-weight: 700; margin-top: 3px; }
+  .menu-nav .nbadge { position: absolute; top: -3px; right: calc(50% - 20px); background: #ff5e7a; color: #fff;
+    font-size: 9px; font-weight: 800; min-width: 15px; height: 15px; border-radius: 8px; display: grid;
+    place-items: center; box-shadow: 0 0 6px rgba(255,94,122,0.7); }
   .stats-row { display: flex; justify-content: space-around; color: #9db4d4; font-size: 13px; font-weight: 600; margin-bottom: 4px; }
   .stats-row label { display: block; font-size: 10px; color: #6d80a0; font-weight: 400; margin-top: 2px; }
   .rosette svg { display: block; }
@@ -472,6 +494,8 @@
   .diary-link:active { transform: scale(0.97); }
   .diary-link .vk { color: #7aa0ff; font-weight: 800; }
   .menu-card .diary-link { margin-top: 4px; }
+  /* Плашка дневника центрируется внутри панелей меты (панель выровнена по левому краю) */
+  .meta-panel .diary-link { display: flex; width: fit-content; margin: 8px auto 2px; }
   .over-card .diary-link { margin-top: 14px; }
   #version-badge {
     position: fixed; right: 8px; bottom: 6px; z-index: 60; pointer-events: auto;
@@ -549,7 +573,7 @@
   @media (max-height: 640px) {
     .hero { display: none; }
     .menu-card::before { content: 'AGILITY RUSH'; display: block; font-size: 22px; font-weight: 900; color: #fff; letter-spacing: 1px; margin-bottom: 8px; }
-    .title-next { display: none; }
+    .title-next { font-size: 10.5px; }
     .controls-hint { display: none; }
     .stats-row label { display: none; }
     .over-missions { display: none; }

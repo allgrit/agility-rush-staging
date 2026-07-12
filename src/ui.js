@@ -45,22 +45,28 @@ export class UI {
     const rec = this.meta.recovered;
     this.meta.recovered = null;
     const title = this.meta.title();
+    // Номер уровня (чиселка «какой это уровень»): индекс титула в TITLES, для легенды — 20+звезда
+    const lvlIdx = TITLES.findIndex(t => t.name === title.current.name);
+    const lvl = title.legend != null ? TITLES.length + title.legend : (lvlIdx >= 0 ? lvlIdx + 1 : 1);
     const missions = this.meta.activeMissions();
+    // Бейдж на вкладке «Задания» — сколько дневных заданий ещё не выполнено сегодня
+    const dailyLeft = this.meta.activeDailyMissions().filter(m => !m.done).length;
     this.menuEl.innerHTML = `
       <div class="menu-card">
-        <div class="hero">
+        <div class="hero tappable" id="hero-play">
           <img src="./assets/hero.png" alt="">
           <div class="hero-title"><h1>AGILITY<span> RUSH</span></h1>
           <div class="subtitle">Бесконечный чемпионат по аджилити</div></div>
+          <div class="tap-hint">👆 Коснись — бежать</div>
         </div>
         <div class="title-row">
           <span class="rosette">${rosetteSVG(title.current.color, 34)}</span>
           <div>
-            <div class="title-name">${title.current.name}</div>
+            <div class="title-name">${title.current.name} <span class="title-lvl">Ур. ${lvl}</span></div>
             <div class="title-bar"><i style="width:${Math.floor(title.progress * 100)}%"></i></div>
             ${title.next
-              ? `<div class="title-next">${d.totalScore.toLocaleString('ru')} / ${title.next.need.toLocaleString('ru')} · до «${title.next.gen}» осталось ${(title.next.need - d.totalScore).toLocaleString('ru')}</div>`
-              : '<div class="title-next">Максимальный титул!</div>'}
+              ? `<div class="title-next">🏆 ${d.totalScore.toLocaleString('ru')} / ${title.next.need.toLocaleString('ru')} · до «${title.next.gen}» ещё ${(title.next.need - d.totalScore).toLocaleString('ru')}</div>`
+              : `<div class="title-next">🏆 ${d.totalScore.toLocaleString('ru')} · максимальный уровень!</div>`}
           </div>
         </div>
         ${rec ? `<div class="recovered-row">💾 Восстановлен прошлый забег: <b>+${rec.cookies}🦴</b>, ${rec.distance} м</div>` : ''}
@@ -79,53 +85,85 @@ export class UI {
         </div>
         <button class="start-btn" id="start-btn">СТАРТ</button>
         <div class="controls-hint">← → полосы · ↑ прыжок · ↓ подкат</div>
-        <div class="missions">
-          ${missions.map(m => {
-            const best = Math.min(m.best, m.target);
-            const pc = Math.floor(best / m.target * 100);
-            return `<div class="mission ${m.done ? 'done' : ''}">
-              <div class="mission-line">🎯 ${m.text} <span>+${m.reward}🦴</span></div>
-              <div class="mission-bar"><i style="width:${pc}%"></i></div>
-              <div class="mission-best">лучшее: ${best} / ${m.target}</div>
+        <!-- Панель «Задания»: миссии + слово дня + дейлики -->
+        <div class="meta-panel on" data-panel="quests">
+          <div class="missions">
+            ${missions.map(m => {
+              const best = Math.min(m.best, m.target);
+              const pc = Math.floor(best / m.target * 100);
+              return `<div class="mission ${m.done ? 'done' : ''}">
+                <div class="mission-line">🎯 ${m.text} <span>+${m.reward}🦴</span></div>
+                <div class="mission-bar"><i style="width:${pc}%"></i></div>
+                <div class="mission-best">лучшее: ${best} / ${m.target}</div>
+              </div>`;
+            }).join('')}
+          </div>
+          ${(() => {
+            const daily = this.meta.daily();
+            const prog = daily.word.split('').map((ch, i) => i < daily.collected ? ch : '·').join(' ');
+            const doneCls = daily.collected >= daily.word.length ? 'done' : '';
+            return `<div class="daily-row ${doneCls}">
+              <span>🔤 Слово дня: <b>${prog}</b></span>
+              <span>${daily.streak > 0 ? '🔥 ' + daily.streak : ''}</span>
             </div>`;
-          }).join('')}
+          })()}
+          ${(() => {
+            const dm = this.meta.activeDailyMissions();
+            return `<div class="daily-missions">${dm.map(m =>
+              `<div class="dmission ${m.done ? 'done' : ''}">⭐ ${m.text}<span>+${m.reward}🦴${m.done ? ' ✓' : ''}</span></div>`
+            ).join('')}</div>`;
+          })()}
         </div>
-        ${(() => {
-          const daily = this.meta.daily();
-          const prog = daily.word.split('').map((ch, i) => i < daily.collected ? ch : '·').join(' ');
-          const doneCls = daily.collected >= daily.word.length ? 'done' : '';
-          return `<div class="daily-row ${doneCls}">
-            <span>🔤 Слово дня: <b>${prog}</b></span>
-            <span>${daily.streak > 0 ? '🔥 ' + daily.streak : ''}</span>
-          </div>`;
-        })()}
-        ${(() => {
-          const dm = this.meta.activeDailyMissions();
-          return `<div class="daily-missions">${dm.map(m =>
-            `<div class="dmission ${m.done ? 'done' : ''}">⭐ ${m.text}<span>+${m.reward}🦴${m.done ? ' ✓' : ''}</span></div>`
-          ).join('')}</div>`;
-        })()}
-        <div class="gift-row" id="gift-row">
-          ${this.meta.giftReady()
-            ? '<button class="gift-btn" id="gift-btn">🎁 Миска корма — забрать!</button>'
-            : `<span class="gift-wait">🎁 Подарок через ${this.meta.giftCountdown()}</span>`}
+        <!-- Панель «Награды»: подарок-миска + статистика -->
+        <div class="meta-panel" data-panel="rewards">
+          <div class="gift-row" id="gift-row">
+            ${this.meta.giftReady()
+              ? '<button class="gift-btn" id="gift-btn">🎁 Миска корма — забрать!</button>'
+              : `<span class="gift-wait">🎁 Подарок через ${this.meta.giftCountdown()}</span>`}
+          </div>
+          <div class="stats-row">
+            <span>🦴 ${d.cookies.toLocaleString('ru')}<label>печеньки</label></span>
+            <span>🏵 ${d.tokens || 0}<label>жетоны</label></span>
+            <span>🏆 ${d.bestScore.toLocaleString('ru')}<label>рекорд</label></span>
+            <span>📏 ${d.bestDistance.toLocaleString('ru')} м<label>дистанция</label></span>
+          </div>
+          <a class="diary-link" href="https://vk.com/chloe.myaussie" target="_blank" rel="noopener">🐾 Дневник Хлои <span class="vk">ВКонтакте ›</span></a>
         </div>
-        <div class="rivals" id="rivals">
-          <div class="rivals-head"><button class="lb-open" id="lb-open">🏅 Онлайн-топ ›</button> <button class="lb-open" id="shop-open">🛍 Магазин</button> <button class="name-btn ${!d.playerName && d.bestScore > 0 ? 'call' : ''}" id="name-btn">${d.playerName ? '✎ ' + d.playerName : (d.bestScore > 0 ? '🏆 в топ!' : '＋ имя')}</button></div>
-          <div id="rivals-list">${this._rivalsPlaceholder(d)}</div>
+        <!-- Панель «Топ»: онлайн-лидерборд + ник + соперники -->
+        <div class="meta-panel" data-panel="top">
+          <div class="rivals" id="rivals">
+            <div class="rivals-head"><button class="lb-open" id="lb-open">🏅 Онлайн-топ ›</button> <button class="name-btn ${!d.playerName && d.bestScore > 0 ? 'call' : ''}" id="name-btn">${d.playerName ? '✎ ' + d.playerName : (d.bestScore > 0 ? '🏆 в топ!' : '＋ имя')}</button></div>
+            <div id="rivals-list">${this._rivalsPlaceholder(d)}</div>
+          </div>
+          <a class="diary-link" href="https://vk.com/chloe.myaussie" target="_blank" rel="noopener">🐾 Дневник Хлои <span class="vk">ВКонтакте ›</span></a>
         </div>
-        <div class="stats-row">
-          <span>🦴 ${d.cookies.toLocaleString('ru')}<label>печеньки</label></span>
-          <span>🏵 ${d.tokens || 0}<label>жетоны</label></span>
-          <span>🏆 ${d.bestScore.toLocaleString('ru')}<label>рекорд</label></span>
-          <span>📏 ${d.bestDistance.toLocaleString('ru')} м<label>дистанция</label></span>
+        <!-- Нижняя навигация с бейджами -->
+        <div class="menu-nav" id="menu-nav">
+          <button data-nav="quests" class="on"><span class="nic">🎯</span><span class="nlb">Задания</span>${dailyLeft > 0 ? `<span class="nbadge">${dailyLeft}</span>` : ''}</button>
+          <button data-nav="rewards"><span class="nic">🎁</span><span class="nlb">Награды</span>${this.meta.giftReady() ? '<span class="nbadge">!</span>' : ''}</button>
+          <button data-nav="top"><span class="nic">🏅</span><span class="nlb">Топ</span>${(!d.playerName && d.bestScore > 0) ? '<span class="nbadge">!</span>' : ''}</button>
+          <button data-nav="shop" id="shop-open"><span class="nic">🛍</span><span class="nlb">Магазин</span></button>
         </div>
-        <a class="diary-link" id="diary-link" href="https://vk.com/chloe.myaussie" target="_blank" rel="noopener">🐾 Дневник Хлои <span class="vk">ВКонтакте ›</span></a>
       </div>`;
     this._showVersion();
     track('menu_shown', {});
+    // Колбэки сохраняем ДО регистрации обработчиков — внутренние вызовы showMenu
+    // (gift/ник/собака) переоткрывают меню через this._onStart/_onSelectDog.
+    this._onStart = onStart;
+    this._onSelectDog = onSelectDog;
     this.menuEl.querySelector('#start-btn').addEventListener('click', onStart);
-    this.menuEl.querySelector('#diary-link').addEventListener('click', () => track('diary_click', { from: 'menu' }));
+    this.menuEl.querySelectorAll('.diary-link').forEach(el => el.addEventListener('click', () => track('diary_click', { from: 'menu' })));
+    // Tap-to-play (парадигма SS): клик по баннеру = старт забега
+    const heroPlay = this.menuEl.querySelector('#hero-play');
+    if (heroPlay) heroPlay.addEventListener('click', onStart);
+    // Нижняя навигация: переключение панелей меты (кнопка «Магазин» открывает оверлей отдельно)
+    const navBtns = this.menuEl.querySelectorAll('.menu-nav button[data-nav]:not(#shop-open)');
+    navBtns.forEach(btn => btn.addEventListener('click', () => {
+      const tab = btn.dataset.nav;
+      navBtns.forEach(b => b.classList.toggle('on', b.dataset.nav === tab));
+      this.menuEl.querySelectorAll('.meta-panel').forEach(p => p.classList.toggle('on', p.dataset.panel === tab));
+      track('menu_tab', { tab });
+    }));
     // Кнопка имени игрока
     const nameBtn = this.menuEl.querySelector('#name-btn');
     if (nameBtn) nameBtn.addEventListener('click', async () => {
@@ -167,8 +205,6 @@ export class UI {
         }
       });
     }
-    this._onStart = onStart;
-    this._onSelectDog = onSelectDog;
     for (const card of this.menuEl.querySelectorAll('.dog-card')) {
       card.addEventListener('click', () => {
         onSelectDog(card.dataset.dog);

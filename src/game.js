@@ -42,8 +42,22 @@ const TUT_GESTURE = {
 const TUT_RANGE = { hurdle: 6, tire: 6, tunnel: 6, table: 5 };
 const TUT_MAX_SHOWS = 5; // сколько раз максимум показать подсказку типа (если игрок не освоил)
 
-// Очки
-const SCORE_CLEAN = 100, SCORE_PERFECT_MULT = 2, SCORE_TABLE = 300, SCORE_COOKIE = 10;
+// Очки. Базовая награда за снаряд привязана к его СЛОЖНОСТИ (по реальной статистике
+// успешных прохождений): чем реже игроки проходят чисто — тем больше очков за риск.
+// Данные (чисто%/срыв%): слалом 29%/71%, качели 48%/52%, горка 55%/45% — сложные;
+// барьер/тоннель/бум/шина/стол — 93–100% чисто (лёгкие). Стол был 300 (переоценён — 100%
+// идеально у всех), снижен: премию отдаём тем, кто реально сложный.
+const SCORE_CLEAN = 100, SCORE_PERFECT_MULT = 2, SCORE_COOKIE = 10;
+const SCORE_BY_KIND = {
+  tunnel: 100,   // простой подкат (100% чисто)
+  hurdle: 100,   // базовый прыжок (93% чисто)
+  tire: 120,     // прыжок в кольцо с таймингом
+  table: 300,    // «замри» — уникальная механика, премиальный снаряд
+  dogwalk: 160,  // бум — баланс, дольше держишься на снаряде
+  aframe: 200,   // горка — 45% срыв
+  seesaw: 240,   // качели — 52% срыв, идеал почти недостижим
+  weave: 280,    // слалом — самый сложный (71% срыв, 29% чисто)
+};
 
 export class Game {
   constructor(renderer, scene, camera, options = {}) {
@@ -180,6 +194,9 @@ export class Game {
     this.hitstopT = 0;
     this.reviveCount = 0;
     this.reviveT = 0;
+    // Флаги воронки для аналитики (сбрасываются на каждый забег): предлагали ли revive и взяли ли его
+    this._reviveOffered = false;
+    this._reviveTaken = false;
     this.pendingDeath = null;
     this.rivalIdx = 0;
     this.rivals = this.meta.rivals();
@@ -220,6 +237,12 @@ export class Game {
     this._zoneSeen = new Set();
     this._msSeen = new Set();
     this._runStartMs = Date.now();
+    // Debug-варп (?warp=<метры>): стартуем сразу в плотной зоне второй оси — дистанция и индекс
+    // чанков поднимаются, поэтому трасса впереди генерится плотно, со связками снаряд→снаряд.
+    if (this._warpDist > 0) {
+      this.distance = this._warpDist;
+      this.track.chunkIndex = Math.max(this.track.chunkIndex, Math.floor(this._warpDist / 34));
+    }
     track('run_start', { run_id: this._runId, run_index: this._runIndex, dog: this.breed, seed: this.seed, ver: this.metaMult });
     // Обучение «за руку» — в живой игре (не в харнессе instant, где детерминизм). Показ
     // фильтруется по learned/count в _updateTutorial. Тест-режим ?tut сбрасывает прогресс.
@@ -1113,19 +1136,21 @@ export class Game {
     this.audio.tableChant();
     this.runStats.tables++;
     this.fx.confetti(new THREE.Vector3(d.x, 1, e.z));
-    this._obstacleClean(e, 'perfect', 'СТОЛ', SCORE_TABLE);
+    this._obstacleClean(e, 'perfect', 'СТОЛ');
   }
 
   // ---------- Награды и наказания ----------
 
-  _obstacleClean(e, grade, name, baseScore = SCORE_CLEAN) {
+  _obstacleClean(e, grade, name, baseScore) {
     const d = this.dog;
     this._recordObstacle(e && e.kind, grade);
     this.combo++;
     this.runStats.maxCombo = Math.max(this.runStats.maxCombo, this.combo);
     this.runStats.cleanObstacles++;
+    // База — по сложности снаряда (SCORE_BY_KIND), либо явно переданная.
+    const base = baseScore != null ? baseScore : (SCORE_BY_KIND[e && e.kind] || SCORE_CLEAN);
     const mult = Math.max(1, this.combo) * (this.powerups.multi > 0 ? 2 : 1) * (this.tableBoostT > 0 ? 2 : 1) * (this.metaMult || 1);
-    let pts = baseScore * mult;
+    let pts = base * mult;
     if (grade === 'perfect') {
       pts *= SCORE_PERFECT_MULT;
       this.runStats.perfects++;
@@ -1299,6 +1324,7 @@ export class Game {
       // Судья готов простить — пауза с оффером
       this.state = 'revive';
       this.reviveT = 5;
+      this._reviveOffered = true; // воронка: revive был предложен
       this.pendingDeath = { e, disqualified };
       this.slowmoT = 0; this.timeScale = 1; this.hitstopT = 0;
       this.audio.whistle();
@@ -1315,6 +1341,7 @@ export class Game {
     this.meta.data.tokens -= price;
     this.meta.save();
     this.reviveCount++;
+    this._reviveTaken = true; // воронка: revive принят
     this.ui.hideRevive();
     this.state = 'running';
     const d = this.dog;
@@ -1355,9 +1382,10 @@ export class Game {
     this._recordObstacle(this._lastHazardKind, 'death'); // столкновение относим к типу снаряда/помехи
     // Аналитика: смерть (где и обо что)
     track('run_death', {
-      run_id: this._runId, distance_m: Math.floor(this.distance), zone: this.world.currentZone,
+      run_id: this._runId, run_index: this._runIndex, distance_m: Math.floor(this.distance), zone: this.world.currentZone,
       obstacle_type: this._lastHazardKind || (disqualified ? 'judge' : 'unknown'),
       score: Math.floor(this.score), combo: this.combo,
+      revive_offered: !!this._reviveOffered, revive_taken: !!this._reviveTaken,
     });
     this.audio.stopMusic();
     this.audio.crash();
@@ -1378,11 +1406,14 @@ export class Game {
     this.ui.hideTutHint();
     // Аналитика: конец забега
     track('run_end', {
-      run_id: this._runId, reason: this.reviveCount > 0 ? 'revive_declined' : 'death',
+      run_id: this._runId, run_index: this._runIndex,
+      reason: this.reviveCount > 0 ? 'revive_declined' : 'death',
       distance_m: Math.floor(rs.distance), score: Math.floor(rs.score),
       duration_s: this._runStartMs ? Math.round((Date.now() - this._runStartMs) / 1000) : 0,
       combo_max: rs.maxCombo, coins: rs.cookies, perfects: rs.perfects, faults: rs.faults,
       clean_obstacles: rs.cleanObstacles, obstacles: this.obstacleStats,
+      // Воронка удержания: доходил ли игрок до N-го забега (run_index) и конверсия revive
+      revive_offered: !!this._reviveOffered, revive_taken: !!this._reviveTaken, revives: this.reviveCount,
     });
     if (this.pendingReload) { setTimeout(() => this.pendingReload(), 1500); }
     rs.score = Math.floor(this.score);
