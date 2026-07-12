@@ -63,7 +63,7 @@ window.__diag = { glLostCount: 0, webgl: (() => {
 const isLocal = location.hostname === '127.0.0.1' || location.hostname === 'localhost';
 const isStaging = location.hostname === 'allgrit.github.io'
   && location.pathname.startsWith('/agility-rush-staging/');
-const wantsRiggedDog = params.get('riggedDog') === '1' && (isLocal || isStaging);
+const wantsRiggedDog = isStaging || (isLocal && params.get('riggedDog') === '1');
 
 let dogFactory = null;
 if (wantsRiggedDog) {

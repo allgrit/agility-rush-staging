@@ -3,7 +3,7 @@
 // по мере запроса). Новая версия НЕ применяется на лету — старые вкладки доигрывают
 // на своём коде, обновление активируется контролируемо по клику игрока (skipWaiting).
 
-const VERSION = 'agility-staging-v2';
+const VERSION = 'agility-staging-v3';
 const CORE = [
   './',
   './index.html',
@@ -86,4 +86,4 @@ self.addEventListener('fetch', (e) => {
     || p.includes('/src/') || p.endsWith('.webmanifest');
   e.respondWith(isOwnCode ? networkFirst(req) : cacheFirst(req));
 });
-// staging v6: rigged-бордер, косметика и необходимые glTF runtime-файлы в precache.
+// staging v7: rigged-бордер включён по умолчанию на staging URL.
