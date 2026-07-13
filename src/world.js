@@ -212,14 +212,15 @@ export class World {
         const pos0 = geo.attributes.position;
         for (let v = 0; v < pos0.count; v++) {
           const vx = pos0.getX(v), vz = pos0.getZ(v);
-          const edge = Math.abs(vx) / 29; // 0 у трассы, 1 на краю
+          const edge = (sd * vx + 29) / 58; // 0 у трассы, 1 на внешнем краю
           // Джиттер сетки, чтобы треугольники были неровными (края фиксируем)
           const onEdgeX = Math.abs(Math.abs(vx) - 29) < 0.01;
           const onEdgeZ = Math.abs(Math.abs(vz) - SEG / 2) < 0.01;
           if (!onEdgeX) pos0.setX(v, vx + (hash(i * 3 + vx, vz) - 0.5) * 3.4);
           if (!onEdgeZ) pos0.setZ(v, vz + (hash(vx, i * 5 + vz) - 0.5) * 3.4);
           const h = hash(i * 7 + vx * 0.35, vz * 0.35);
-          pos0.setY(v, (h - 0.3) * (0.2 + edge * 3.2)); // холмистее к краям
+          // Внутренняя кромка совпадает с уровнем трассы; полный рельеф начинается дальше от неё.
+          pos0.setY(v, 0.12 + (h - 0.3) * (0.04 + edge * 3.2));
         }
         geo = geo.toNonIndexed();
         const pos = geo.attributes.position;
