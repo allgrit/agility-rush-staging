@@ -31,7 +31,30 @@ export class CameraRig {
   dip(v = 1) { this.dipV -= 1.6 * v; }
   rollPulse() { this.rollPulseT = 0.6; }
   startOrbit() { this.orbit = 1; this.orbitAngle = 0; }
-  reset() { this.orbit = 0; this.shakeAmp = 0; this.zoomPunch = 0; this.dipY = 0; this.dipV = 0; }
+  reset() {
+    this.pos.set(0, 2.6, 6);
+    this.vel.set(0, 0, 0);
+    this.lookAt.set(0, 0.8, 0);
+    this.shakeAmp = 0;
+    this.shakeT = 0;
+    this.fovKick = 0;
+    this.rollTarget = 0;
+    this.roll = 0;
+    this.zoomPunch = 0;
+    this.orbit = 0;
+    this.orbitAngle = 0;
+    this.time = 0;
+    this.dipY = 0;
+    this.dipV = 0;
+    this.rollPulseT = 0;
+    this.crouch = 0;
+    this.flyK = 0;
+    this.elevK = 0;
+    this.camera.position.copy(this.pos);
+    this.camera.fov = this.baseFov;
+    this.camera.lookAt(this.lookAt);
+    this.camera.updateProjectionMatrix();
+  }
 
   update(dt, dog, speed, lean, opts = {}) {
     this.shakeT += dt * 24;

@@ -86,6 +86,33 @@ export class Dog {
     this.tailSprings = [];
     this.blinkT = 0;
     this._build();
+    this.groundSupport = this._readGroundSupport();
+  }
+
+  _readGroundSupport() {
+    // Опорная база выводится из реальной геометрии передних/задних лап с учётом
+    // breed scale. Это единый контракт модели, а не поправки под конкретный снаряд.
+    this.root.updateWorldMatrix(true, true);
+    const inverseRoot = this.root.matrixWorld.clone().invert();
+    const footprintZ = keys => {
+      const values = [];
+      for (const key of keys) {
+        const paw = this.legs?.[key]?.paw;
+        const position = paw?.geometry?.attributes?.position;
+        if (!paw || !position) continue;
+        for (let index = 0; index < position.count; index++) {
+          const point = new THREE.Vector3().fromBufferAttribute(position, index)
+            .applyMatrix4(paw.matrixWorld)
+            .applyMatrix4(inverseRoot);
+          values.push(point.z);
+        }
+      }
+      return values;
+    };
+    const front = footprintZ(['FL', 'FR']);
+    const rear = footprintZ(['RL', 'RR']);
+    if (!front.length || !rear.length) return null;
+    return { frontZ: Math.min(...front), rearZ: Math.max(...rear) };
   }
 
   _build() {
@@ -343,7 +370,7 @@ export class Dog {
         pom.position.set(0, -lowerLen + 0.05, 0);
         knee.add(pom);
       }
-      this.legs[key] = { hip, knee, isFront };
+      this.legs[key] = { hip, knee, paw, isFront };
     }
   }
 
@@ -351,6 +378,9 @@ export class Dog {
   update(dt, pose) {
     this.time += dt;
     const p = pose;
+    // Уклон относится ко всей собаке, а не только к spine: так лапы, корпус,
+    // голова и аксессуары остаются в одной системе координат поверхности.
+    this.root.rotation.x = p.surfacePitch || 0;
     const spine = this.parts.spine;
     const mode = p.mode || 'run';
 

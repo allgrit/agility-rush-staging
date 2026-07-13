@@ -278,6 +278,57 @@ export class RiggedDog {
     }
     this._switchMode('idle');
     this.mixer.update(0);
+    this.groundSupport = this._readGroundSupport();
+  }
+
+  _readGroundSupport() {
+    // glTF удаляет точки из имён костей (`front_toe.L` -> `front_toeL`), поэтому
+    // принимаем обе формы. Z берём из семантических toe-bones, а не из габарита
+    // морда–хвост: это реальная опорная база rig без подобранных magic offsets.
+    const localZ = names => {
+      const bone = names.map(name => this.model.getObjectByName(name)).find(Boolean);
+      if (!bone) return null;
+      this.model.updateWorldMatrix(true, true);
+      const inverse = this.model.matrixWorld.clone().invert();
+      return bone.getWorldPosition(new THREE.Vector3()).applyMatrix4(inverse).z;
+    };
+    const front = [
+      localZ(['front_toeL', 'front_toe.L']),
+      localZ(['front_toeR', 'front_toe.R']),
+    ].filter(Number.isFinite);
+    const rear = [
+      localZ(['rear_toeL', 'rear_toe.L']),
+      localZ(['rear_toeR', 'rear_toe.R']),
+    ].filter(Number.isFinite);
+    if (front.length !== 2 || rear.length !== 2) return null;
+    return {
+      frontZ: front.reduce((sum, value) => sum + value, 0) / front.length,
+      rearZ: rear.reduce((sum, value) => sum + value, 0) / rear.length,
+    };
+  }
+
+  resetForRun() {
+    this.mixer.stopAllAction();
+    for (const action of this.actions.values()) {
+      action.stop();
+      action.reset();
+      action.enabled = true;
+      action.paused = false;
+      action.setEffectiveTimeScale(1);
+      action.setEffectiveWeight(1);
+    }
+    this.mixer.setTime(0);
+    this.currentAction = null;
+    this.mode = null;
+    this.modeTime = 0;
+    this.root.position.set(0, 0, 0);
+    this.root.rotation.set(0, 0, 0);
+    this.root.scale.set(1, 1, 1);
+    this.model.position.set(0, 0, 0);
+    this.model.rotation.set(0, 0, 0);
+    this.model.scale.set(1, 1, 1);
+    this._switchMode('idle');
+    this.mixer.update(0);
   }
 
   _switchMode(mode) {
@@ -297,6 +348,9 @@ export class RiggedDog {
 
   update(dt, pose = {}) {
     const mode = pose.mode || 'run';
+    // Surface pitch применяется ко всему персонажу; animation pitch остаётся локальным
+    // для прыжка/подброса и не удваивает наклон поверхности.
+    this.root.rotation.x = pose.surfacePitch || 0;
     if (mode !== this.mode) this._switchMode(mode);
     this.modeTime += dt;
     this.mixer.update(dt);
@@ -322,9 +376,10 @@ export class RiggedDog {
     const balance = mode === 'balance' ? (pose.balance || 0) : 0;
     this.model.rotation.z = lean + weave * 0.85 + balance * 0.65;
     this.model.rotation.y = (lean + weave) * 0.28;
-    this.model.rotation.x = (mode === 'jump' || mode === 'takeoff')
+    const animationPitch = (mode === 'jump' || mode === 'takeoff')
       ? THREE.MathUtils.clamp(-(pose.vy || 0) * 0.035, -0.28, 0.34)
       : (mode === 'launched' ? (pose.spin || 0) : 0);
+    this.model.rotation.x = animationPitch;
 
     const land = THREE.MathUtils.clamp((pose.landT || 0) / 0.18, 0, 1);
     this.model.scale.set(1 + land * 0.06, 1 - land * 0.14, 1 + land * 0.08);

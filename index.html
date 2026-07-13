@@ -8,14 +8,14 @@
   // Bootstrap-версия: index.html грузится всегда свежим (network-first / без SW),
   // поэтому знает актуальную сборку. Если у игрока в кэше старьё — один раз чистим
   // все кэши, разрегистрируем старый SW и перезагружаемся. Разрывает «залипание» SW.
-  window.__BUILD = 'staging-v9-prod16-rigged';
-  window.__CACHE = 'agility-staging-v5'; // должно совпадать с VERSION в sw.js
+  window.__BUILD = 'staging-v10-prod16-rigged-grounding';
+  window.__CACHE = 'agility-staging-v6'; // должно совпадать с VERSION в sw.js
   (function () {
     try {
       var qs = new URLSearchParams(location.search);
       if (qs.has('harness')) return;
-      // Cache Storage и HTTP-кэш браузера — разные слои. GitHub Pages держит JS
-      // до 10 минут, поэтому одной очистки service worker недостаточно.
+      // Cache Storage и HTTP-кэш браузера — разные слои. GitHub Pages может
+      // держать JS до 10 минут, поэтому одной очистки service worker недостаточно.
       var runtimeUrls = [
         './src/main.js', './src/game.js', './src/world.js', './src/track.js',
         './src/obstacles.js', './src/dog.js', './src/fx.js', './src/camera_rig.js',
@@ -59,7 +59,7 @@
       var staleKey = '__stale_' + window.__BUILD;
       if (sessionStorage.getItem(staleKey)) return;
       caches.keys().then(function (ks) {
-        // Устаревший кэш — любой agility-rush-* кроме текущего. Ловит залипших с 1-го захода.
+        // Устаревший staging-кэш ловим отдельно от production-кэшей.
         var stale = ks.filter(function (k) { return k.indexOf('agility-staging') === 0 && k !== window.__CACHE; });
         if (!stale.length) return;
         sessionStorage.setItem(staleKey, '1');

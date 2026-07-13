@@ -194,8 +194,8 @@ export function buildWeave(lane, z, count = 6) {
 
 export function buildAFrame(lane, z) {
   const g = new THREE.Group();
-  const rampLen = 3.2, peakH = 1.6, width = 1.5;
-  const rampGeo = new THREE.BoxGeometry(width, 0.1, Math.hypot(rampLen, peakH));
+  const rampLen = 3.2, peakH = 1.6, width = 1.5, boardThickness = 0.1;
+  const rampGeo = new THREE.BoxGeometry(width, boardThickness, Math.hypot(rampLen, peakH));
   const upMat = std(AGILITY_BLUE);
   const up = new THREE.Mesh(rampGeo, upMat);
   const ang = Math.atan2(peakH, rampLen);
@@ -221,7 +221,10 @@ export function buildAFrame(lane, z) {
   const placeOnRamp = (mesh, frac, isUp) => {
     // frac: 0 у земли, 1 на вершине
     const zPos = isUp ? rampLen * (1 - frac) : -rampLen * (1 - frac);
-    mesh.position.set(0, peakH * frac + 0.06, zPos);
+    // Цветной слой и рёбра центрируются по той же плоскости, что и основная доска.
+    // Их чуть большая толщина уже устраняет z-fighting; дополнительный +0.06 поднимал
+    // всю контактную геометрию над настилом и создавал ложное проникновение лап.
+    mesh.position.set(0, peakH * frac, zPos);
   };
   placeOnRamp(czUp, 0.16, true);
   g.add(czUp);
@@ -254,17 +257,25 @@ export function buildAFrame(lane, z) {
   g.position.set(LANE_X[lane], 0, z);
   const rec = {
     kind: 'aframe', lane, z, group: g,
-    rampLen, peakH,
+    rampLen, peakH, width, boardThickness, ang,
     entry: z + rampLen, exit: z - rampLen,
     // Контактная зона на спуске: последние 25% спуска
     contactStart: z - rampLen * 0.45, contactEnd: z - rampLen,
     czDown, resolved: false, occupied: false, glowT: 0,
-    heightAt(dogZ) {
-      // Профиль высоты по z (dogZ в мировых координатах)
+    surfacePoseAt(dogZ) {
       const rel = dogZ - this.z; // + до вершины (подъём), − после
-      if (rel > this.rampLen || rel < -this.rampLen) return 0;
-      const frac = 1 - Math.abs(rel) / this.rampLen;
-      return this.peakH * frac;
+      if (rel > this.rampLen || rel < -this.rampLen) return null;
+      const topOffset = this.boardThickness * 0.5 / Math.cos(this.ang);
+      const topY = this.peakH * (1 - Math.abs(rel) / this.rampLen) + topOffset;
+      return {
+        topY,
+        pitch: rel > 0 ? this.ang : rel < 0 ? -this.ang : 0,
+        segment: rel > 0 ? 'up' : rel < 0 ? 'down' : 'peak',
+      };
+    },
+    surfaceBreakpoints() { return [this.entry, this.z, this.exit]; },
+    heightAt(dogZ) {
+      return this.surfacePoseAt(dogZ)?.topY ?? 0;
     },
     pulseT: 0,
     update(dt) {
@@ -287,13 +298,13 @@ export function buildAFrame(lane, z) {
 
 export function buildDogwalk(lane, z) {
   const g = new THREE.Group();
-  const plankLen = 6, h = 1.1, rampLen = 2.2, width = 0.45;
+  const plankLen = 6, h = 1.1, rampLen = 2.2, width = 0.45, boardThickness = 0.08;
   const mat = std(AGILITY_BLUE);
-  const plank = new THREE.Mesh(new THREE.BoxGeometry(width, 0.08, plankLen), mat);
+  const plank = new THREE.Mesh(new THREE.BoxGeometry(width, boardThickness, plankLen), mat);
   plank.position.y = h;
   plank.castShadow = true; plank.receiveShadow = true;
   g.add(plank);
-  const rampGeo = new THREE.BoxGeometry(width, 0.08, Math.hypot(rampLen, h));
+  const rampGeo = new THREE.BoxGeometry(width, boardThickness, Math.hypot(rampLen, h));
   const ang = Math.atan2(h, rampLen);
   const rampUp = new THREE.Mesh(rampGeo, mat);
   rampUp.rotation.x = ang;
@@ -324,16 +335,35 @@ export function buildDogwalk(lane, z) {
   g.position.set(LANE_X[lane], 0, z);
   const totalHalf = plankLen / 2 + rampLen;
   const rec = {
-    kind: 'dogwalk', lane, z, group: g, width,
+    kind: 'dogwalk', lane, z, group: g, width, plankLen, rampLen, boardThickness, ang, totalHalf,
     entry: z + totalHalf, exit: z - totalHalf,
     plankStart: z + plankLen / 2, plankEnd: z - plankLen / 2,
     h, resolved: false, occupied: false,
-    heightAt(dogZ) {
+    surfacePoseAt(dogZ) {
       const rel = dogZ - this.z;
       const a = Math.abs(rel);
-      if (a > totalHalf) return 0;
-      if (a <= plankLen / 2) return this.h;
-      return this.h * (1 - (a - plankLen / 2) / rampLen);
+      if (a > this.totalHalf) return null;
+      if (a < this.plankLen / 2) {
+        return { topY: this.h + this.boardThickness * 0.5, pitch: 0, segment: 'deck' };
+      }
+      const centerY = this.h * (1 - (a - this.plankLen / 2) / this.rampLen);
+      const rampTop = centerY + this.boardThickness * 0.5 / Math.cos(this.ang);
+      if (a === this.plankLen / 2) {
+        return {
+          topY: Math.max(this.h + this.boardThickness * 0.5, rampTop),
+          pitch: 0,
+          segment: 'joint',
+        };
+      }
+      return {
+        topY: rampTop,
+        pitch: rel > 0 ? this.ang : -this.ang,
+        segment: rel > 0 ? 'up' : 'down',
+      };
+    },
+    surfaceBreakpoints() { return [this.entry, this.plankStart, this.plankEnd, this.exit]; },
+    heightAt(dogZ) {
+      return this.surfacePoseAt(dogZ)?.topY ?? 0;
     },
     update() {},
   };
@@ -342,11 +372,11 @@ export function buildDogwalk(lane, z) {
 
 export function buildSeesaw(lane, z) {
   const g = new THREE.Group();
-  const plankLen = 3.8, pivotH = 0.55, width = 0.5;
+  const plankLen = 3.8, pivotH = 0.55, width = 0.5, boardThickness = 0.07;
   const pivot = new THREE.Group();
   pivot.position.y = pivotH;
   g.add(pivot);
-  const plank = new THREE.Mesh(new THREE.BoxGeometry(width, 0.07, plankLen), std(0xe0603a));
+  const plank = new THREE.Mesh(new THREE.BoxGeometry(width, boardThickness, plankLen), std(0xe0603a));
   plank.castShadow = true; plank.receiveShadow = true;
   pivot.add(plank);
   const czMat = std(CONTACT_YELLOW);
@@ -365,14 +395,26 @@ export function buildSeesaw(lane, z) {
   const maxTilt = Math.atan2(pivotH, plankLen / 2) * 0.9;
   pivot.rotation.x = maxTilt; // ближний конец опущен (вход со стороны +z)
   const rec = {
-    kind: 'seesaw', lane, z, group: g, pivot, plankLen, pivotH, maxTilt, width,
+    kind: 'seesaw', lane, z, group: g, pivot, plankLen, pivotH, maxTilt, width, boardThickness,
     entry: z + plankLen / 2, exit: z - plankLen / 2,
     resolved: false, occupied: false, tilt: -maxTilt, tiltVel: 0, banged: false,
-    heightAt(dogZ) {
-      const rel = this.z - dogZ; // + когда собака за пивотом (дальняя половина)
-      return Math.max(0, this.pivotH + Math.tan(this.tilt) * rel * -1);
+    _surfacePrepared: false,
+    surfacePoseAt(dogZ) {
+      const rel = dogZ - this.z;
+      if (Math.abs(rel) > this.plankLen / 2) return null;
+      const pitch = -this.tilt;
+      return {
+        topY: Math.max(0, this.pivotH + Math.tan(this.tilt) * rel
+          + this.boardThickness * 0.5 / Math.cos(pitch)),
+        pitch,
+        segment: 'plank',
+      };
     },
-    update(dt, dogZ) {
+    surfaceBreakpoints() { return [this.entry, this.exit]; },
+    heightAt(dogZ) {
+      return this.surfacePoseAt(dogZ)?.topY ?? 0;
+    },
+    advanceSurface(dt, dogZ) {
       if (this.occupied && dogZ != null) {
         // Наклон следует за позицией собаки
         const rel = this.z - dogZ;
@@ -388,6 +430,17 @@ export function buildSeesaw(lane, z) {
       }
       this.tilt = Math.max(-this.maxTilt, Math.min(this.maxTilt, this.tilt));
       this.pivot.rotation.x = -this.tilt; // игровая конвенция: tilt<0 = ближний конец внизу
+    },
+    prepareSurface(dt, dogZ) {
+      this.advanceSurface(dt, dogZ);
+      this._surfacePrepared = true;
+    },
+    update(dt, dogZ) {
+      if (this._surfacePrepared) {
+        this._surfacePrepared = false;
+        return;
+      }
+      this.advanceSurface(dt, dogZ);
     },
   };
   return rec;

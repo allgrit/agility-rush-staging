@@ -120,6 +120,7 @@ export class Game {
   }
 
   _resetRunState() {
+    this.inputQueue.length = 0;
     this.dog = {
       lane: 1, x: 0, y: 0, vy: 0, z: 0,
       airborne: false, jumpStart: 0, jumpElapsed: 0,
@@ -129,14 +130,19 @@ export class Game {
     };
     this._judgeAnimT = 0;
     this._pendingSpawns = [];
+    this.tunnelIn = null;
     this.onApparatus = null; // текущий контактный снаряд (aframe/dogwalk/seesaw)
+    this.groundingSurface = null; // профиль под лапами может жить чуть дольше gameplay-контакта
     this.apparatusState = null;
     this.weave = null;
+    this.inputRecentSlide = 0;
     this.tableT = 0;
+    this.tableBoostT = 0;
     this.flyT = 0;
     this.speedModT = 0; this.speedMod = 1;
     this.boostT = 0;
     this.judgeT = 0;
+    this.missionCheckT = 0;
     this.timeScale = 1;
     this.slowmoT = 0;
     this.distance = 0;
@@ -154,6 +160,16 @@ export class Game {
     // (perfect/clean/fault/death) — чтобы видеть честный fail-rate и где игроки «стоят».
     this.obstacleStats = {};
     this.milestones = [5, 10, 20, 30, 50];
+    this._lastHazardKind = null;
+    this._runId = null;
+    this._runStartMs = 0;
+    this._zoneSeen = new Set();
+    this._msSeen = new Set();
+    if (this.tutorial) {
+      this.tutorial.active = false;
+      this.tutorial.curType = null;
+      this.tutorial.curTarget = null;
+    }
   }
 
   // ---------- Публичное API ----------
@@ -188,6 +204,15 @@ export class Game {
     this.world.reset();
     this._removeFrisbee();
     this._resetRunState();
+    if (typeof this.dogModel?.resetForRun === 'function') this.dogModel.resetForRun();
+    this.rig.reset();
+    this.dogModel.root.position.set(this.dog.x, this.dog.y, this.dog.z);
+    this.dogModel.root.rotation.y = 0;
+    this.dogLight.position.set(this.dog.x, this.dog.y + 1.6, this.dog.z + 0.4);
+    this.judge.visible = false;
+    this.ui.hideTutHint();
+    this.ui.hidePause();
+    this.ui.hideRevive();
     this.track.recordDist = this.meta.data.bestDistance || 0;
     this.metaMult = this.meta.data.scoreMult || 1;
     this.recordBeaten = false;
@@ -367,6 +392,7 @@ export class Game {
     const lean = THREE.MathUtils.clamp(dx * 0.35, -0.45, 0.45);
 
     // Вертикаль
+    this._prepareGroundingSurface(dt);
     this._updateVertical(dt);
 
     // Таймеры
@@ -471,7 +497,7 @@ export class Game {
     // Модель
     const pose = this._dogPose();
     this.dogModel.update(dt, pose);
-    this.dogModel.root.position.set(d.x, d.y, d.z);
+    this.dogModel.root.position.set(d.x, d.y + (pose.surfaceLift || 0), d.z);
     this.dogLight.position.set(d.x, d.y + 1.6, d.z + 0.4);
     this.dogModel.root.rotation.y = 0;
 
@@ -557,6 +583,7 @@ export class Game {
       spin: d.launchSpin,
       shakeT: d.shakeT,
       deadT: d.deadT,
+      ...this._groundingPose(),
     };
   }
 
@@ -626,6 +653,7 @@ export class Game {
       else { d.jumpBufferT = 0.14; return; } // буфер: сработает при приземлении
     }
     d.airborne = true;
+    this.groundingSurface = null;
     d.vy = JUMP_V;
     d.jumpElapsed = 0;
     d.slideT = 0;
@@ -633,6 +661,69 @@ export class Game {
     this.fx.bigDust(new THREE.Vector3(d.x, 0.05, d.z + 0.2));
     this.dogModel.earImpulse(-1.2);
     this.dogModel.tailImpulse(2.5);
+  }
+
+  _groundSupport() {
+    const support = this.dogModel?.groundSupport;
+    if (!support || !Number.isFinite(support.frontZ) || !Number.isFinite(support.rearZ)
+      || support.frontZ >= support.rearZ) return null;
+    return support;
+  }
+
+  _prepareGroundingSurface(dt) {
+    const surface = this.onApparatus || this.groundingSurface;
+    surface?.prepareSurface?.(dt, this.dog.z);
+  }
+
+  _surfaceTopAt(surface, z) {
+    if (!surface) return 0;
+    if (typeof surface.surfacePoseAt === 'function') {
+      return Math.max(0, surface.surfacePoseAt(z)?.topY || 0);
+    }
+    return Math.max(0, surface.heightAt?.(z) || 0);
+  }
+
+  _refreshGroundingSurface() {
+    const surface = this.groundingSurface;
+    if (!surface || this.onApparatus === surface) return;
+    const support = this._groundSupport();
+    const rearZ = support?.rearZ || 0;
+    if (surface.exit == null || this.dog.z + rearZ <= surface.exit) {
+      this.groundingSurface = null;
+    }
+  }
+
+  _groundingPose() {
+    const d = this.dog;
+    if (d.airborne || d.launchedT > 0 || this.flyT > 0) {
+      return { surfacePitch: 0, surfaceLift: 0 };
+    }
+    this._refreshGroundingSurface();
+    const surface = this.onApparatus || this.groundingSurface;
+    if (!surface) return { surfacePitch: 0, surfaceLift: 0 };
+
+    const center = surface.surfacePoseAt?.(d.z);
+    const support = this._groundSupport();
+    if (!support) {
+      return { surfacePitch: center?.pitch || 0, surfaceLift: 0 };
+    }
+
+    const { frontZ, rearZ } = support;
+    const frontY = this._surfaceTopAt(surface, d.z + frontZ);
+    const rearY = this._surfaceTopAt(surface, d.z + rearZ);
+    const surfacePitch = Math.atan2(frontY - rearY, rearZ - frontZ);
+    const offsets = [frontZ, 0, rearZ];
+    for (const breakpoint of surface.surfaceBreakpoints?.() || []) {
+      const dz = breakpoint - d.z;
+      if (dz >= frontZ && dz <= rearZ) offsets.push(dz);
+    }
+    const slope = Math.tan(surfacePitch);
+    const rootY = Math.max(...offsets.map(dz => this._surfaceTopAt(surface, d.z + dz) + slope * dz));
+    const centerY = this._surfaceTopAt(surface, d.z);
+    return {
+      surfacePitch,
+      surfaceLift: Math.max(0, rootY - centerY),
+    };
   }
 
   _updateVertical(dt) {
@@ -655,11 +746,11 @@ export class Game {
       }
       return;
     }
+    this._refreshGroundingSurface();
     // Высота поверхности под собакой (снаряды с профилем + подиумы)
     let groundY = 0;
-    if (this.onApparatus && this.onApparatus.heightAt) {
-      groundY = this.onApparatus.heightAt(d.z);
-    }
+    const contactSurface = this.onApparatus || this.groundingSurface;
+    groundY = this._surfaceTopAt(contactSurface, d.z);
     groundY = Math.max(groundY, this._podiumHeight(d.x, d.z));
     if (d.airborne) {
       d.jumpElapsed += dt;
@@ -697,7 +788,9 @@ export class Game {
       d.coyoteT = 0.12;
       d.jumpElapsed = 2 * JUMP_V / GRAVITY * 0.55; // поза «снижение»
     } else {
-      d.y += (groundY - d.y) * Math.min(1, 18 * dt);
+      // Grounded-контакт следует геометрии точно. Временной lerp создавал стабильное
+      // отставание 11.7 см на подъёме и погружал корпус в настил.
+      d.y = groundY;
     }
   }
 
@@ -756,7 +849,9 @@ export class Game {
         // Падение с бума
         e.occupied = false; e.resolved = true;
         this.onApparatus = null; this.apparatusState = null;
-        d.y = 0; d.airborne = true; d.vy = 0.5;
+        this.groundingSurface = null;
+        // Начинаем ballistic fall с фактической высоты доски, без телепорта в землю.
+        d.airborne = true; d.vy = 0.5;
         this._fault(e, 'УПАЛ С БУМА');
         this._stumble(false);
         return;
@@ -785,6 +880,7 @@ export class Game {
           // Спрыгнул раньше времени — подброс
           this._fault(e, 'РАНО!');
           d.launchedT = 0.7; d.vy = 5; d.airborne = false;
+          this.groundingSurface = null;
         }
         this.apparatusState = null;
       }
@@ -1115,6 +1211,7 @@ export class Game {
     if (d.z <= e.entry + 0.6 && d.z > e.entry - 1 && this._laneMatch(e)) {
       e.occupied = true;
       this.onApparatus = e;
+      this.groundingSurface = e;
       this.apparatusState = { balance: 0, drift: 0, driftT: 0, maxBal: 0, peaked: false, contactHit: false, contactEarly: false, bangWindow: e.kind === 'seesaw' ? null : undefined, pressed: false };
       if (e.kind === 'seesaw') this.apparatusState.bangWindow = 0;
       d.lane = e.lane;
