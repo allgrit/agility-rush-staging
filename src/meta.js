@@ -258,6 +258,8 @@ export class Meta {
         completed.push(m);
       }
     }
+    // Ничего не выполнено — не пересобираем массив и не пишем в localStorage (лишний JSON.stringify).
+    if (!completed.length) return completed;
     // Выполненную заменяем СЛЕДУЮЩЕЙ по бесконечной генерации — миссии никогда не кончаются.
     if (this.data.missionSeq == null) this.data.missionSeq = this.data.missions.length;
     this.data.missions = this.data.missions.map(m => m.done ? genMission(this.data.missionSeq++) : m);

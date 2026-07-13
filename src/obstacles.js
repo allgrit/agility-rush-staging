@@ -95,7 +95,7 @@ export function buildTire(lane, z) {
         this.flashT -= dt;
         const k = 1 + Math.sin(this.flashT * 30) * 0.06;
         this.tire.scale.setScalar(k);
-        this.tire.material.emissive = new THREE.Color(0xff8844).multiplyScalar(Math.max(0, this.flashT));
+        this.tire.material.emissive.setHex(0xff8844).multiplyScalar(Math.max(0, this.flashT));
       }
     },
     flash() { this.flashT = 1; },
@@ -282,13 +282,13 @@ export function buildAFrame(lane, z) {
       this.pulseT += dt;
       if (this.glowT > 0) {
         this.glowT -= dt;
-        this.czDown.material.emissive = new THREE.Color(CONTACT_YELLOW).multiplyScalar(Math.max(0, this.glowT) * 0.8);
+        this.czDown.material.emissive.setHex(CONTACT_YELLOW).multiplyScalar(Math.max(0, this.glowT) * 0.8);
       } else if (this.occupied) {
         // Подсветить контактную зону, когда собака на снаряде — подсказка игроку
         const pulse = 0.25 + Math.sin(this.pulseT * 20) * 0.15;
-        this.czDown.material.emissive = new THREE.Color(CONTACT_YELLOW).multiplyScalar(pulse);
+        this.czDown.material.emissive.setHex(CONTACT_YELLOW).multiplyScalar(pulse);
       } else {
-        this.czDown.material.emissive = new THREE.Color(0x332800);
+        this.czDown.material.emissive.setHex(0x332800);
       }
     },
     glow() { this.glowT = 1.2; },
@@ -463,7 +463,7 @@ export function buildTable(lane, z) {
     update(dt) {
       if (this.glowT > 0) {
         this.glowT -= dt;
-        this.top.material.emissive = new THREE.Color(0xffdd44).multiplyScalar(Math.max(0, this.glowT) * 0.6);
+        this.top.material.emissive.setHex(0xffdd44).multiplyScalar(Math.max(0, this.glowT) * 0.6);
       }
     },
     glow() { this.glowT = 1.5; },
@@ -685,6 +685,7 @@ function glintTexture() {
   ctx.fill();
   ctx.beginPath(); ctx.arc(32, 32, 7, 0, 7); ctx.fill();
   _glintTex = new THREE.CanvasTexture(cv);
+  _glintTex.userData.shared = true; // общий синглтон — disposeGroup не должен его уничтожать
   return _glintTex;
 }
 

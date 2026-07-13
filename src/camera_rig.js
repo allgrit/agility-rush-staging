@@ -24,6 +24,8 @@ export class CameraRig {
     this.rollPulseT = 0;
     this.crouch = 0; // сглаженный crouch-фактор (тоннель/подкат)
     this.flyK = 0;   // сглаженный полётный фактор
+    this._tgt = new THREE.Vector3();  // scratch для target/lookTarget — без new Vector3 каждый кадр
+    this._look = new THREE.Vector3();
   }
 
   shake(amp) { this.shakeAmp = Math.max(this.shakeAmp, amp); }
@@ -64,13 +66,13 @@ export class CameraRig {
       // Медленный облёт вокруг собаки после смерти
       this.orbitAngle += dt * 0.7;
       const r = 3.4;
-      const target = new THREE.Vector3(
+      const target = this._tgt.set(
         dog.x + Math.sin(this.orbitAngle + 0.6) * r,
         1.6 + Math.sin(this.orbitAngle * 0.5) * 0.3,
         dog.z + Math.cos(this.orbitAngle + 0.6) * r
       );
       this.pos.lerp(target, 1 - Math.pow(0.02, dt));
-      this.lookAt.lerp(new THREE.Vector3(dog.x, 0.5, dog.z), 1 - Math.pow(0.001, dt));
+      this.lookAt.lerp(this._look.set(dog.x, 0.5, dog.z), 1 - Math.pow(0.001, dt));
       this.camera.position.copy(this.pos);
       this.camera.lookAt(this.lookAt);
       this.camera.fov += (58 - this.camera.fov) * dt * 2;
@@ -94,7 +96,7 @@ export class CameraRig {
     back += this.crouch * -0.6 + this.flyK * 1.1 + this.elevK * 0.5;
     height += this.crouch * -0.75 + this.flyK * 0.7 + this.elevK * 0.35;
     height = Math.max(0.95, height);
-    const target = new THREE.Vector3(dog.x * 0.72, height, dog.z + back);
+    const target = this._tgt.set(dog.x * 0.72, height, dog.z + back);
 
     // Критически демпфированная пружина
     const stiff = 7.5;
@@ -126,7 +128,7 @@ export class CameraRig {
     this.camera.position.set(this.pos.x + sx + bx, this.pos.y + bob + sy + by + this.dipY, this.pos.z);
 
     // Взгляд: вперёд по трассе, с опережением в сторону манёвра
-    const lookTarget = new THREE.Vector3(dog.x * 0.8 + lean * 1.1, 0.55 + dog.y * 0.7 - this.crouch * 0.25 - this.elevK * 0.4, dog.z - 3.6 - this.flyK * 2);
+    const lookTarget = this._look.set(dog.x * 0.8 + lean * 1.1, 0.55 + dog.y * 0.7 - this.crouch * 0.25 - this.elevK * 0.4, dog.z - 3.6 - this.flyK * 2);
     this.lookAt.lerp(lookTarget, 1 - Math.pow(0.0001, dt));
     this.camera.lookAt(this.lookAt);
 

@@ -6,6 +6,8 @@ import { catalog, RARITY, priceOf } from './cosmetics.js';
 
 // Весь HUD и меню — DOM поверх канваса: чётче текст, дешевле анимации (CSS).
 
+const PW_KEYS = ['magnet', 'shield', 'rocket', 'multi']; // порядок пауэрапов в HUD (как в powerups)
+
 // Цветная SVG-розетка (эмодзи 🏵 в headless/тёмной теме читается плохо)
 function rosetteSVG(color = '#f0c531', size = 34) {
   return `<svg width="${size}" height="${size}" viewBox="0 0 40 48">
@@ -358,6 +360,10 @@ export class UI {
   hideMenu() {
     this.menuEl.style.display = 'none';
     this.hud.style.display = 'block';
+    // Сброс HUD на новый забег: иначе тикающий счёт «стекает» с прошлого значения к 0,
+    // а кэш диффинга держит старые значения (пере-запишутся, но счёт мигал бы).
+    this._displayScore = 0;
+    this._hud = {};
     // Гасим отложенные ретраи онлайн-топа и снимаем слушатель сети — иначе утекают
     // и пишут в уже несуществующий DOM, а поколение (_topGen) отбрасывает поздние ответы.
     this._topGen = (this._topGen || 0) + 1;
@@ -479,41 +485,59 @@ export class UI {
   }
 
   updateHUD(state) {
-    // Счёт тикает к фактическому
+    // HUD-диффинг: обновляем DOM только при смене значения (updateHUD зовётся 60×/с) —
+    // раньше каждый кадр перезаписывались textContent/стили и innerHTML пауэрапов (jank).
+    const h = this._hud || (this._hud = {});
+    // Счёт тикает к фактическому — textContent только при смене целого
     this._displayScore += (state.score - this._displayScore) * 0.2;
     if (Math.abs(state.score - this._displayScore) < 2) this._displayScore = state.score;
-    this.scoreEl.textContent = Math.floor(this._displayScore).toLocaleString('ru');
-    this.cookieEl.textContent = '🦴 ' + state.cookies;
-    const tokEl = document.getElementById('tokens');
-    if (tokEl) {
+    const sc = Math.floor(this._displayScore);
+    if (sc !== h.score) { h.score = sc; this.scoreEl.textContent = sc.toLocaleString('ru'); }
+    if (state.cookies !== h.cookies) { h.cookies = state.cookies; this.cookieEl.textContent = '🦴 ' + state.cookies; }
+    const tokEl = this._tokEl || (this._tokEl = document.getElementById('tokens'));
+    if (tokEl && state.tokens !== h.tokens) {
+      h.tokens = state.tokens;
       tokEl.style.display = state.tokens > 0 ? 'block' : 'none';
       tokEl.textContent = '🏵 ' + state.tokens;
     }
-    const multEl = document.getElementById('mult');
-    if (multEl) {
+    const multEl = this._multEl || (this._multEl = document.getElementById('mult'));
+    if (multEl && state.metaMult !== h.mult) {
+      h.mult = state.metaMult;
       multEl.style.display = state.metaMult > 1 ? 'block' : 'none';
       multEl.textContent = '×' + state.metaMult;
     }
-    if (state.combo > 1) {
-      this.comboEl.style.display = 'block';
-      this.comboEl.querySelector('.combo-num').textContent = '×' + state.combo;
+    // Комбо: видимость/число/hot — диффим; полоска прогресса меняется каждый кадр (её оставляем)
+    const comboVis = state.combo > 1;
+    if (comboVis !== !!h.comboVis) { h.comboVis = comboVis; this.comboEl.style.display = comboVis ? 'block' : 'none'; }
+    if (comboVis) {
+      if (state.combo !== h.combo) { h.combo = state.combo; this.comboEl.querySelector('.combo-num').textContent = '×' + state.combo; }
       this.comboFill.style.width = Math.min(100, state.comboFresh * 100) + '%';
-      this.comboEl.classList.toggle('hot', state.combo >= 10);
-    } else {
-      this.comboEl.style.display = 'none';
+      const hot = state.combo >= 10;
+      if (hot !== h.comboHot) { h.comboHot = hot; this.comboEl.classList.toggle('hot', hot); }
     }
-    // Пауэрапы с таймерами
-    let html = '';
-    for (const [k, v] of Object.entries(state.powerups)) {
-      if (v > 0) {
-        const icons = { magnet: '🧲', shield: '🛡', rocket: '🥏', multi: '✨' };
-        html += `<div class="pw"><span>${icons[k]}</span><i style="width:${Math.min(100, v / state.powerupMax[k] * 100)}%"></i></div>`;
+    // Пауэрапы: ПОСТОЯННЫЕ узлы (создаём один раз), меняем только видимость и ширину полоски —
+    // без пересборки innerHTML каждый кадр.
+    if (!this._pwNodes) {
+      this._pwNodes = {};
+      const icons = { magnet: '🧲', shield: '🛡', rocket: '🥏', multi: '✨' };
+      for (const k of PW_KEYS) {
+        const div = document.createElement('div'); div.className = 'pw'; div.style.display = 'none';
+        div.innerHTML = `<span>${icons[k]}</span><i></i>`;
+        this._pwNodes[k] = { div, bar: div.querySelector('i'), shown: false };
+        this.powerupsEl.appendChild(div);
       }
     }
-    this.powerupsEl.innerHTML = html;
-    // Виньетка опасности (судья рядом)
-    this.vignette.style.opacity = state.danger ? 0.5 : 0;
-    this.speedlines.style.opacity = state.boost ? 0.6 : 0;
+    for (const k of PW_KEYS) {
+      const v = state.powerups[k], node = this._pwNodes[k];
+      const show = v > 0;
+      if (show !== node.shown) { node.shown = show; node.div.style.display = show ? '' : 'none'; }
+      if (show) node.bar.style.width = Math.min(100, v / state.powerupMax[k] * 100) + '%';
+    }
+    // Виньетка/спидлайны — диффим
+    const dOp = state.danger ? 0.5 : 0;
+    if (dOp !== h.danger) { h.danger = dOp; this.vignette.style.opacity = dOp; }
+    const sOp = state.boost ? 0.6 : 0;
+    if (sOp !== h.boost) { h.boost = sOp; this.speedlines.style.opacity = sOp; }
   }
 
   // Летящая к счётчику косточка + панч счётчика

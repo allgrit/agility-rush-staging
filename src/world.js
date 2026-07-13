@@ -14,6 +14,9 @@ const ZONES = [
 ];
 const ZONE_LEN = 260; // метров на зону — смена света видна уже в коротком забеге
 
+// Scratch-цвета для _applyZone: переиспользуются каждый кадр вместо new THREE.Color (без GC-мусора)
+const _zc0 = new THREE.Color(), _zc1 = new THREE.Color(), _zc2 = new THREE.Color();
+
 export class World {
   constructor(scene, rng, renderer = null) {
     this.scene = scene;
@@ -155,6 +158,8 @@ export class World {
     };
     for (let i = 0; i < COUNT; i++) {
       const seg = new THREE.Group();
+      // Scratch для сборки инстанс-матриц декора (копируются в InstancedMesh, переиспользуемы)
+      const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), E = new THREE.Euler(), V = new THREE.Vector3();
       // Полосы стрижки газона: 6 продольных лент двух тонов
       const stripeW = TRACK_HALF * 2 / 6;
       for (let st = 0; st < 6; st++) {
@@ -172,26 +177,33 @@ export class World {
         line.receiveShadow = true;
         seg.add(line);
       }
-      // Пунктир центров полос
-      for (const lx of LANE_X) {
-        for (let d = 0; d < SEG; d += 3) {
-          const dash = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.015, 1.2), lineMat);
-          dash.position.set(lx, 0.012, -SEG / 2 + d + 0.6);
-          seg.add(dash);
+      // Пунктир центров полос — один InstancedMesh (был ~30 отдельных мешей)
+      {
+        const dashInst = new THREE.InstancedMesh(new THREE.BoxGeometry(0.05, 0.015, 1.2), lineMat, LANE_X.length * Math.ceil(SEG / 3));
+        let di = 0;
+        for (const lx of LANE_X) for (let d = 0; d < SEG; d += 3) {
+          M.makeTranslation(lx, 0.012, -SEG / 2 + d + 0.6);
+          dashInst.setMatrixAt(di++, M);
         }
+        dashInst.instanceMatrix.needsUpdate = true; dashInst.computeBoundingSphere();
+        seg.add(dashInst);
       }
-      // Бордюры: красно-белые сегменты по кромке трассы
-      for (const sd of [-1, 1]) {
-        for (let d = 0; d < SEG; d += 1.5) {
-          const curb = new THREE.Mesh(
-            new THREE.BoxGeometry(0.28, 0.11, 1.5),
-            new THREE.MeshStandardMaterial({ color: (d / 1.5) % 2 < 1 ? 0xd8434e : 0xf5f0e6, roughness: 0.9, flatShading: true })
-          );
-          curb.position.set(sd * (TRACK_HALF + 0.14), 0.005, -SEG / 2 + d + 0.75);
-          curb.castShadow = true;
-          curb.receiveShadow = true;
-          seg.add(curb);
+      // Бордюры: красно-белые сегменты по кромке — 2 InstancedMesh (по цвету, через material.color —
+      // точный путь оригинала; instanceColor давал чуть иной цвет из-за color-management). Был ~40 мешей.
+      {
+        const curbGeo = new THREE.BoxGeometry(0.28, 0.11, 1.5);
+        const N = 2 * Math.ceil(SEG / 1.5);
+        const mkCurb = (hex) => { const m = new THREE.InstancedMesh(curbGeo, new THREE.MeshStandardMaterial({ color: hex, roughness: 0.9, flatShading: true }), N); m.castShadow = true; m.receiveShadow = true; return m; };
+        const curbRed = mkCurb(0xd8434e), curbWhite = mkCurb(0xf5f0e6);
+        let ri = 0, wi = 0;
+        for (const sd of [-1, 1]) for (let d = 0; d < SEG; d += 1.5) {
+          M.makeTranslation(sd * (TRACK_HALF + 0.14), 0.005, -SEG / 2 + d + 0.75);
+          if ((d / 1.5) % 2 < 1) curbRed.setMatrixAt(ri++, M); else curbWhite.setMatrixAt(wi++, M);
         }
+        curbRed.count = ri; curbWhite.count = wi;
+        curbRed.instanceMatrix.needsUpdate = true; curbRed.computeBoundingSphere();
+        curbWhite.instanceMatrix.needsUpdate = true; curbWhite.computeBoundingSphere();
+        seg.add(curbRed, curbWhite);
       }
       // Фасеточный террейн: subdiv-плоскость с шумом высоты и пятнами двух тонов травы
       for (const sd of [-1, 1]) {
@@ -248,69 +260,62 @@ export class World {
         }
         inst.instanceMatrix.needsUpdate = true;
         seg.add(inst);
-        // Ромашки и клевер по кромкам поля
+        // Ромашки по кромкам поля — 2 InstancedMesh (лепестки+сердцевины). Поворот -PI/2 запечён в геометрию.
         const daisyMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
         const centerMat = new THREE.MeshBasicMaterial({ color: 0xf0d05a });
+        const petalGeo = new THREE.CircleGeometry(0.05, 6); petalGeo.rotateX(-Math.PI / 2);
+        const coreGeo = new THREE.CircleGeometry(0.02, 5); coreGeo.rotateX(-Math.PI / 2);
+        const petalInst = new THREE.InstancedMesh(petalGeo, daisyMat, 5);
+        const coreInst = new THREE.InstancedMesh(coreGeo, centerMat, 5);
         for (let b = 0; b < 5; b++) {
           const rx = hash(i * 43 + b, 19), rz = hash(i * 47 + b, 23);
           const sdd = rx > 0.5 ? 1 : -1;
-          const daisy = new THREE.Group();
-          const petals = new THREE.Mesh(new THREE.CircleGeometry(0.05, 6), daisyMat);
-          petals.rotation.x = -Math.PI / 2;
-          daisy.add(petals);
-          const core = new THREE.Mesh(new THREE.CircleGeometry(0.02, 5), centerMat);
-          core.rotation.x = -Math.PI / 2;
-          core.position.y = 0.005;
-          daisy.add(core);
-          daisy.position.set(sdd * (TRACK_HALF - 0.35 - rz * 0.9), 0.035, -SEG / 2 + hash(b, i) * SEG);
-          seg.add(daisy);
+          const px = sdd * (TRACK_HALF - 0.35 - rz * 0.9), pz = -SEG / 2 + hash(b, i) * SEG;
+          petalInst.setMatrixAt(b, M.makeTranslation(px, 0.035, pz));
+          coreInst.setMatrixAt(b, M.makeTranslation(px, 0.04, pz)); // сердцевина y+0.005
         }
+        petalInst.instanceMatrix.needsUpdate = true; petalInst.computeBoundingSphere();
+        coreInst.instanceMatrix.needsUpdate = true; coreInst.computeBoundingSphere();
+        seg.add(petalInst); seg.add(coreInst);
       }
 
-      // Декор сегмента: кочки, цветы, камни (детерминированно от индекса сегмента)
+      // Декор сегмента: кочки/цветы/камни → InstancedMesh (было ~20 мешей+материалов на сегмент)
       const flowerCols = [0xf0d05a, 0xe05656, 0xc77fe0, 0xf0f0f0, 0xf09a3d];
+      const tuftInst = new THREE.InstancedMesh(new THREE.ConeGeometry(0.05, 1, 4), new THREE.MeshStandardMaterial({ color: 0x4d8f38, roughness: 1, flatShading: true }), 4 * 3);
+      const stemInst = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.015, 0.02, 0.22, 4), new THREE.MeshStandardMaterial({ color: 0x3f7a30, roughness: 1 }), 3);
+      const headGeo = new THREE.IcosahedronGeometry(0.06, 0); // общая геометрия головок (материал per-цвет)
+      const rockInst = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 0), new THREE.MeshStandardMaterial({ color: 0x9aa0a8, roughness: 1, flatShading: true }), 2);
+      rockInst.castShadow = true;
+      let tk = 0, fk = 0, rk = 0;
       for (let d = 0; d < 9; d++) {
         const r1 = hash(i * 13 + d, 1), r2 = hash(i * 17 + d, 2), r3 = hash(i * 19 + d, 3);
         const sd = r1 > 0.5 ? 1 : -1;
         const x = sd * (TRACK_HALF + 0.8 + r2 * 7);
         const z = -SEG / 2 + r3 * SEG;
         if (d < 4) {
-          // Кочка травы: пучок плоских конусов
-          const tuft = new THREE.Group();
+          // Кочка травы: 3 конуса. Высота через scale.Y базового конуса (height=1), поворот.z — в матрицу.
           for (let k = 0; k < 3; k++) {
-            const blade = new THREE.Mesh(
-              new THREE.ConeGeometry(0.05, 0.28 + hash(d, k) * 0.2, 4),
-              new THREE.MeshStandardMaterial({ color: 0x4d8f38, roughness: 1, flatShading: true })
-            );
-            blade.position.set((hash(d, k + 9) - 0.5) * 0.22, 0.14, (hash(d, k + 5) - 0.5) * 0.22);
-            blade.rotation.z = (hash(d, k + 7) - 0.5) * 0.5;
-            tuft.add(blade);
+            const height = 0.28 + hash(d, k) * 0.2;
+            E.set(0, 0, (hash(d, k + 7) - 0.5) * 0.5); Q.setFromEuler(E);
+            V.set(x + (hash(d, k + 9) - 0.5) * 0.22, 0.14, z + (hash(d, k + 5) - 0.5) * 0.22);
+            tuftInst.setMatrixAt(tk++, M.compose(V, Q, new THREE.Vector3(1, height, 1)));
           }
-          tuft.position.set(x, 0, z);
-          seg.add(tuft);
         } else if (d < 7) {
-          // Цветок: стебель + шарик
-          const fl = new THREE.Group();
-          const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.02, 0.22, 4),
-            new THREE.MeshStandardMaterial({ color: 0x3f7a30, roughness: 1 }));
-          stem.position.y = 0.11;
-          fl.add(stem);
-          const head = new THREE.Mesh(new THREE.IcosahedronGeometry(0.06, 0),
-            new THREE.MeshStandardMaterial({ color: flowerCols[(i + d) % flowerCols.length], roughness: 0.8, flatShading: true }));
-          head.position.y = 0.25;
-          fl.add(head);
-          fl.position.set(x, 0, z);
-          seg.add(fl);
+          // Цветок: стебель (инстанс, shared зелёный) + головка (per-mesh, material.color — точный цвет)
+          stemInst.setMatrixAt(fk++, M.makeTranslation(x, 0.11, z));
+          const head = new THREE.Mesh(headGeo, new THREE.MeshStandardMaterial({ color: flowerCols[(i + d) % flowerCols.length], roughness: 0.8, flatShading: true }));
+          head.position.set(x, 0.25, z);
+          seg.add(head);
         } else {
-          // Камень
-          const rock = new THREE.Mesh(new THREE.IcosahedronGeometry(0.16 + r2 * 0.2, 0),
-            new THREE.MeshStandardMaterial({ color: 0x9aa0a8, roughness: 1, flatShading: true }));
-          rock.scale.y = 0.55;
-          rock.position.set(x, 0.04, z);
-          rock.castShadow = true;
-          seg.add(rock);
+          // Камень: базовый Icosahedron(1,0) масштабируем до (r, 0.55r, r), без поворота
+          const radius = 0.16 + r2 * 0.2;
+          rockInst.setMatrixAt(rk++, M.compose(V.set(x, 0.04, z), Q.identity(), new THREE.Vector3(radius, radius * 0.55, radius)));
         }
       }
+      tuftInst.instanceMatrix.needsUpdate = true; tuftInst.computeBoundingSphere();
+      stemInst.instanceMatrix.needsUpdate = true; stemInst.computeBoundingSphere();
+      rockInst.instanceMatrix.needsUpdate = true; rockInst.computeBoundingSphere();
+      seg.add(tuftInst, stemInst, rockInst);
       seg.position.z = -i * SEG + SEG;
       seg.userData.z0 = seg.position.z;
       this.scene.add(seg);
@@ -643,27 +648,29 @@ export class World {
   }
 
   _applyZone(za, zb, t) {
-    const lerpC = (a, b) => new THREE.Color(a).lerp(new THREE.Color(b), t);
-    this.skyMat.uniforms.topColor.value = lerpC(za.sky, zb.sky);
-    this.skyMat.uniforms.bottomColor.value = lerpC(za.horizon, zb.horizon);
-    this.sun.color = lerpC(za.sun, zb.sun);
+    // Мутируем существующие Color'ы через scratch (_zc*), без аллокаций каждый кадр (GC-нагрев).
+    // li(dst,a,b): dst = lerp(a,b,t) — результат идентичен прежнему new Color(a).lerp(new Color(b),t).
+    const li = (dst, a, b) => { dst.set(a).lerp(_zc2.set(b), t); };
+    li(this.skyMat.uniforms.topColor.value, za.sky, zb.sky);
+    li(this.skyMat.uniforms.bottomColor.value, za.horizon, zb.horizon);
+    li(this.sun.color, za.sun, zb.sun);
     this.sun.intensity = za.sunInt + (zb.sunInt - za.sunInt) * t;
-    this.amb.color = lerpC(za.amb, zb.amb);
+    li(this.amb.color, za.amb, zb.amb);
     this.amb.intensity = za.ambInt + (zb.ambInt - za.ambInt) * t;
-    this.scene.fog.color = lerpC(za.fog, zb.fog);
-    this.grassMat.color = lerpC(za.grass, zb.grass);
-    this.trackMatA.color = lerpC(za.trackA, zb.trackA);
-    this.trackMatB.color = lerpC(za.trackB, zb.trackB);
-    this.sunDisc.material.color = lerpC(za.sun, zb.sun);
+    li(this.scene.fog.color, za.fog, zb.fog);
+    li(this.grassMat.color, za.grass, zb.grass);
+    li(this.trackMatA.color, za.trackA, zb.trackA);
+    li(this.trackMatB.color, za.trackB, zb.trackB);
+    li(this.sunDisc.material.color, za.sun, zb.sun);
     this.rim.intensity = za.rim + (zb.rim - za.rim) * t;
     this.cloudMat.opacity = za.cloudOp + (zb.cloudOp - za.cloudOp) * t;
-    this.cloudMat.color = lerpC(za.cloud, zb.cloud);
-    if (this.hillMat) this.hillMat.color = lerpC(za.hill, zb.hill);
+    li(this.cloudMat.color, za.cloud, zb.cloud);
+    if (this.hillMat) li(this.hillMat.color, za.hill, zb.hill);
     if (this.ridgeMat) {
       // Хребет чуть светлее тумана — читается как дальний план
-      const fogC = lerpC(za.fog, zb.fog);
-      const skyC = lerpC(za.sky, zb.sky);
-      this.ridgeMat.color = fogC.lerp(skyC, 0.7).multiplyScalar(0.82);
+      _zc0.set(za.fog).lerp(_zc2.set(zb.fog), t); // fogC
+      _zc1.set(za.sky).lerp(_zc2.set(zb.sky), t); // skyC
+      this.ridgeMat.color.copy(_zc0).lerp(_zc1, 0.7).multiplyScalar(0.82);
     }
     if (this.renderer) this.renderer.toneMappingExposure = za.expo + (zb.expo - za.expo) * t;
   }

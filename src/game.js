@@ -144,6 +144,7 @@ export class Game {
     this.judgeT = 0;
     this.missionCheckT = 0;
     this.timeScale = 1;
+    this.tutTimeScale = 1; // сглаженный масштаб времени туториала (лерп 1↔0.7)
     this.slowmoT = 0;
     this.distance = 0;
     this.score = 0;
@@ -309,9 +310,13 @@ export class Game {
       this.timeScale = 0.05; // стоп-кадр: «это имело значение»
       if (this.hitstopT <= 0) this.timeScale = this.slowmoT > 0 ? 0.35 : 1;
     }
-    // Обучение: пока висит подсказка к снаряду — мягко замедляем, чтобы игрок успел
-    // прочитать жест и попасть в момент. Снимается вместе с подсказкой (не залипает).
-    if (this.tutorial.active && this.tutorial.curType) this.timeScale = Math.min(this.timeScale, 0.55);
+    // Обучение: пока висит подсказка к снаряду — мягко замедляем (0.7×), чтобы игрок успел
+    // прочитать жест. ПЛАВНО входим и выходим (лерп tutTimeScale), без резкого щелчка скорости —
+    // прежний жёсткий 0.55 давал ощущение «сброса скорости» на возврате. Хит-стоп/перфект-slowmo
+    // (0.05/0.35) остаются резкими: они — намеренный juice и всегда «побеждают» через min().
+    const tutTarget = (this.tutorial.active && this.tutorial.curType) ? 0.7 : 1;
+    this.tutTimeScale += (tutTarget - this.tutTimeScale) * Math.min(1, 6 * dtRaw);
+    this.timeScale = Math.min(this.timeScale, this.tutTimeScale);
     const dt = dtRaw * this.timeScale;
     this.popups.update(dtRaw);
 
@@ -506,22 +511,27 @@ export class Game {
     this.track.update(dt, d.z);
     this.fx.update(dt);
     this.fx.updateMotes(d.z);
-    this.rig.update(dtRaw, { x: d.x, y: d.y, z: d.z, gallopPhase: d.gallopPhase }, d.speed, lean, { crouch: !!this.tunnelIn || d.slideT > 0.15, fly: this.flyT > 0, elevated: d.y > 0.9 && !d.airborne && !this.onApparatus });
+    // Переиспользуем объекты-аргументы (rig читает их сразу, не хранит) — без аллокаций/кадр
+    const rd = this._rigDog || (this._rigDog = {});
+    rd.x = d.x; rd.y = d.y; rd.z = d.z; rd.gallopPhase = d.gallopPhase;
+    const ro = this._rigOpts || (this._rigOpts = {});
+    ro.crouch = !!this.tunnelIn || d.slideT > 0.15; ro.fly = this.flyT > 0; ro.elevated = d.y > 0.9 && !d.airborne && !this.onApparatus;
+    this.rig.update(dtRaw, rd, d.speed, lean, ro);
 
     // HUD
     this.runStats.cleanStreakDist = Math.max(this.runStats.cleanStreakDist, this.distance - this.runStats._streakStart);
-    this.ui.updateHUD({
-      score: Math.floor(this.score),
-      cookies: this.runStats.cookies,
-      combo: this.combo,
-      comboFresh: this._comboProgress(),
-      powerups: this.powerups,
-      powerupMax: this.powerupMax,
-      danger: this.judgeT > 0,
-      boost: this.boostT > 0 || this.flyT > 0 || this.tableBoostT > 0,
-      metaMult: this.metaMult || 1,
-      tokens: this.meta.data.tokens || 0,
-    });
+    const hs = this._hudState || (this._hudState = {});
+    hs.score = Math.floor(this.score);
+    hs.cookies = this.runStats.cookies;
+    hs.combo = this.combo;
+    hs.comboFresh = this._comboProgress();
+    hs.powerups = this.powerups;     // живые ссылки: updateHUD читает поля СРАЗУ и не хранит ссылку
+    hs.powerupMax = this.powerupMax; // (безопасно, как и было до диффинга)
+    hs.danger = this.judgeT > 0;
+    hs.boost = this.boostT > 0 || this.flyT > 0 || this.tableBoostT > 0;
+    hs.metaMult = this.metaMult || 1;
+    hs.tokens = this.meta.data.tokens || 0;
+    this.ui.updateHUD(hs);
   }
 
   // Вехи дистанции и вход в зону — для drop-off воронки и «доля доживших до ночи»
@@ -567,24 +577,25 @@ export class Game {
     else if (extended && d.speed < 8.5) mode = 'trot';
     else mode = 'run';
     const jumpDur = 2 * JUMP_V / GRAVITY;
-    return {
-      mode,
-      phase: d.gallopPhase,
-      speed: d.speed,
-      jumpT: d.airborne ? Math.min(1, d.jumpElapsed / jumpDur) : 0,
-      takeoffT: d.airborne ? Math.min(1, d.jumpElapsed / 0.2) : 0,
-      landingT: d.landT > 0 ? 1 - Math.min(1, d.landT / 0.18) : 0,
-      stumbleT: d.stumbleAnimT > 0 ? 1 - Math.min(1, d.stumbleAnimT / 0.7) : 0,
-      vy: d.vy,
-      lean: THREE.MathUtils.clamp((LANE_X[d.lane] - d.x) * 0.4, -0.5, 0.5),
-      weaveLean: this.weave ? -Math.sin((this.weave.entry - d.z) / this.weave.spacing * Math.PI) * 0.42 : 0,
-      landT: d.landT,
-      balance: this.apparatusState ? (this.apparatusState.balance || 0) : 0,
-      spin: d.launchSpin,
-      shakeT: d.shakeT,
-      deadT: d.deadT,
-      ...this._groundingPose(),
-    };
+    // Мутируем постоянный объект (dogModel.update читает его сразу) — без аллокации/кадр
+    const p = this._pose || (this._pose = {});
+    p.mode = mode;
+    p.phase = d.gallopPhase;
+    p.speed = d.speed;
+    p.jumpT = d.airborne ? Math.min(1, d.jumpElapsed / jumpDur) : 0;
+    p.takeoffT = d.airborne ? Math.min(1, d.jumpElapsed / 0.2) : 0;
+    p.landingT = d.landT > 0 ? 1 - Math.min(1, d.landT / 0.18) : 0;
+    p.stumbleT = d.stumbleAnimT > 0 ? 1 - Math.min(1, d.stumbleAnimT / 0.7) : 0;
+    p.vy = d.vy;
+    p.lean = THREE.MathUtils.clamp((LANE_X[d.lane] - d.x) * 0.4, -0.5, 0.5);
+    p.weaveLean = this.weave ? -Math.sin((this.weave.entry - d.z) / this.weave.spacing * Math.PI) * 0.42 : 0;
+    p.landT = d.landT;
+    p.balance = this.apparatusState ? (this.apparatusState.balance || 0) : 0;
+    p.spin = d.launchSpin;
+    p.shakeT = d.shakeT;
+    p.deadT = d.deadT;
+    this._groundingPose(p);
+    return p;
   }
 
   _processInput(dt) {
@@ -693,19 +704,27 @@ export class Game {
     }
   }
 
-  _groundingPose() {
+  _groundingPose(pose = {}) {
     const d = this.dog;
     if (d.airborne || d.launchedT > 0 || this.flyT > 0) {
-      return { surfacePitch: 0, surfaceLift: 0 };
+      pose.surfacePitch = 0;
+      pose.surfaceLift = 0;
+      return pose;
     }
     this._refreshGroundingSurface();
     const surface = this.onApparatus || this.groundingSurface;
-    if (!surface) return { surfacePitch: 0, surfaceLift: 0 };
+    if (!surface) {
+      pose.surfacePitch = 0;
+      pose.surfaceLift = 0;
+      return pose;
+    }
 
     const center = surface.surfacePoseAt?.(d.z);
     const support = this._groundSupport();
     if (!support) {
-      return { surfacePitch: center?.pitch || 0, surfaceLift: 0 };
+      pose.surfacePitch = center?.pitch || 0;
+      pose.surfaceLift = 0;
+      return pose;
     }
 
     const { frontZ, rearZ } = support;
@@ -720,10 +739,9 @@ export class Game {
     const slope = Math.tan(surfacePitch);
     const rootY = Math.max(...offsets.map(dz => this._surfaceTopAt(surface, d.z + dz) + slope * dz));
     const centerY = this._surfaceTopAt(surface, d.z);
-    return {
-      surfacePitch,
-      surfaceLift: Math.max(0, rootY - centerY),
-    };
+    pose.surfacePitch = surfacePitch;
+    pose.surfaceLift = Math.max(0, rootY - centerY);
+    return pose;
   }
 
   _updateVertical(dt) {
@@ -1617,7 +1635,15 @@ export class Game {
   }
 
   _removeFrisbee() {
-    if (this.frisbee) { this.scene.remove(this.frisbee); this.frisbee = null; }
+    if (this.frisbee) {
+      this.scene.remove(this.frisbee);
+      // Освобождаем GPU-ресурсы — иначе каждый rocket-пауэрап течёт памятью (потеря контекста)
+      this.frisbee.traverse((o) => {
+        if (o.geometry) o.geometry.dispose();
+        if (o.material) { const m = Array.isArray(o.material) ? o.material : [o.material]; m.forEach(x => x && x.dispose()); }
+      });
+      this.frisbee = null;
+    }
   }
 
   _updateFrisbee(dt) {

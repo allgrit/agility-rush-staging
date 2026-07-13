@@ -3,7 +3,7 @@
 // по мере запроса). Новая версия НЕ применяется на лету — старые вкладки доигрывают
 // на своём коде, обновление активируется контролируемо по клику игрока (skipWaiting).
 
-const VERSION = 'agility-staging-v6';
+const VERSION = 'agility-staging-v7';
 const CORE = [
   './',
   './index.html',
@@ -11,7 +11,7 @@ const CORE = [
   './src/main.js', './src/game.js', './src/world.js', './src/track.js',
   './src/obstacles.js', './src/dog.js', './src/fx.js', './src/camera_rig.js',
   './src/audio.js', './src/ui.js', './src/meta.js', './src/rng.js', './src/leaderboard.js', './src/version.js', './src/analytics.js',
-  './src/cosmetics.js', './src/rigged_dog.js',
+  './src/cosmetics.js', './src/rigged_host.js', './src/rigged_dog.js',
   './assets/hero.png', './assets/dog-border.png', './assets/dog-aussie.png', './assets/dog-poodle.png',
   './assets/icon-180.png', './assets/icon-512.png',
   './assets/models/border-collie-test.glb',
@@ -86,4 +86,4 @@ self.addEventListener('fetch', (e) => {
     || p.includes('/src/') || p.endsWith('.webmanifest');
   e.respondWith(isOwnCode ? networkFirst(req) : cacheFirst(req));
 });
-// staging v10: production v16 UI + rigged grounding/reset + восстановление HTTP-кэша.
+// staging v11: production v18 candidate + rigged Border + v17 performance-пакет.

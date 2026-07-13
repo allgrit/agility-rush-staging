@@ -20,7 +20,10 @@ function disposeGroup(group) {
     if (o.geometry) o.geometry.dispose();
     if (o.material) {
       const mats = Array.isArray(o.material) ? o.material : [o.material];
-      for (const m of mats) { if (m && m.map) m.map.dispose(); if (m) m.dispose(); }
+      // ВАЖНО: общие (shared) текстуры НЕ диспозим — их используют другие сущности.
+      // Напр. _glintTex (блик косточки) — модульный синглтон; его dispose рушил блик у всех
+      // последующих косточек (перф-churn + визуальный баг). Помечаем shared через userData.
+      for (const m of mats) { if (m && m.map && !m.map.userData.shared) m.map.dispose(); if (m) m.dispose(); }
     }
   });
 }

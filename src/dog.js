@@ -5,6 +5,10 @@ import { COATS, NECKS } from './cosmetics.js';
 // Вся анимация процедурная: game передаёт pose (mode/phase/jumpT/lean/vy),
 // модель раскладывает её по суставам. Уши и хвост — на пружинной физике (вторичная анимация).
 
+// Константы анимации ног — вынесены из update, чтобы не аллоцировать массив/объект каждый кадр
+const LEG_KEYS = ['FL', 'FR', 'RL', 'RR'];
+const LEG_PHASE = { FL: 0, FR: 0.7, RR: Math.PI * 0.95, RL: Math.PI * 0.95 + 0.65 };
+
 const BREEDS = {
   border: {
     name: 'Бордер-колли',
@@ -401,10 +405,10 @@ export class Dog {
       const ph = p.phase;
       const spd = Math.min(1, p.speed / 22);
       const amp = 0.75 + spd * 0.35;
-      const legPh = { FL: 0, FR: 0.7, RR: Math.PI * 0.95, RL: Math.PI * 0.95 + 0.65 };
-      for (const key of ['FL', 'FR', 'RL', 'RR']) {
-        const s = Math.sin(ph - legPh[key]);
-        const c2 = Math.cos(ph - legPh[key]);
+
+      for (const key of LEG_KEYS) {
+        const s = Math.sin(ph - LEG_PHASE[key]);
+        const c2 = Math.cos(ph - LEG_PHASE[key]);
         const isFront = key[0] === 'F';
         const hipRot = s * amp * (isFront ? 1 : 0.85) + (isFront ? 0.1 : -0.12);
         // Колено сгибается на проносе (когда нога идёт вперёд по воздуху)
@@ -476,7 +480,7 @@ export class Dog {
       bodyPitch = 0.1;
       stretch = 1.2;
       bodyScaleY = 0.88;
-      for (const key of ['FL', 'FR', 'RL', 'RR']) {
+      for (const key of LEG_KEYS) {
         const off = key === 'FL' ? 0 : key === 'FR' ? Math.PI : key === 'RL' ? Math.PI * 0.5 : Math.PI * 1.5;
         setLeg(key, Math.sin(ph + off) * 0.55 + (key[0] === 'F' ? 0.9 : -0.6), key[0] === 'F' ? 1.7 : 1.9);
       }
@@ -487,7 +491,7 @@ export class Dog {
     } else if (mode === 'idle') {
       const b = Math.sin(this.time * 2.2) * 0.01;
       bodyY = 0.42 + b;
-      for (const key of ['FL', 'FR', 'RL', 'RR']) setLeg(key, key[0] === 'F' ? 0.05 : -0.05, 0.12);
+      for (const key of LEG_KEYS) setLeg(key, key[0] === 'F' ? 0.05 : -0.05, 0.12);
       headYaw = Math.sin(this.time * 0.7) * 0.25;
       tailWagSpeed = 9; tailWagAmp = 0.5; tailBase = 0.2; // радостно виляет
       if (p.shakeT != null && p.shakeT < 1) { // встряхивание
@@ -505,14 +509,14 @@ export class Dog {
     } else if (mode === 'launched') { // подброшен качелей
       const ph = this.time * 20;
       bodyPitch = p.spin || 0;
-      for (const key of ['FL', 'FR', 'RL', 'RR']) setLeg(key, Math.sin(ph + key.charCodeAt(1)) * 0.8, 0.9);
+      for (const key of LEG_KEYS) setLeg(key, Math.sin(ph + key.charCodeAt(1)) * 0.8, 0.9);
       tailBase = 0.6;
     } else if (mode === 'dead') {
       const t = Math.min(1, p.deadT || 0);
       bodyY = 0.42 - t * 0.19;
       bodyPitch = t * 0.5;
       bodyRoll = t * 1.2;
-      for (const key of ['FL', 'FR', 'RL', 'RR']) setLeg(key, 0.4, 1.2);
+      for (const key of LEG_KEYS) setLeg(key, 0.4, 1.2);
       headPitch = t * 0.4;
       tailBase = -0.4; tailWagSpeed = 0;
     } else if (mode === 'fly') { // ракета-фрисби

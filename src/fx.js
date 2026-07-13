@@ -5,6 +5,10 @@ import * as THREE from 'three';
 
 const MAX_PARTICLES = 600;
 
+// Scratch для ориентации вытянутых частиц: не аллоцируем Vector3 каждый кадр (GC-нагрев)
+const _Y_AXIS = new THREE.Vector3(0, 1, 0); // константа, НЕ мутировать
+const _tmpDir = new THREE.Vector3();
+
 export class Fx {
   constructor(scene) {
     this.scene = scene;
@@ -193,7 +197,7 @@ export class Fx {
       if (p.mesh.position.y < 0.02 && p.gravity < -3) { p.mesh.position.y = 0.02; p.vel.y *= -0.3; }
       if (p.stretchVel && p.vel.lengthSq() > 0.01) {
         // Ориентируем вытянутую частицу вдоль скорости
-        p.mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), p.vel.clone().normalize());
+        p.mesh.quaternion.setFromUnitVectors(_Y_AXIS, _tmpDir.copy(p.vel).normalize());
       } else {
         p.mesh.rotation.x += p.spin * dt;
         p.mesh.rotation.y += p.spin * 0.7 * dt;

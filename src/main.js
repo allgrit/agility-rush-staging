@@ -4,6 +4,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { Game, FIXED_DT } from './game.js';
+import { shouldUseRiggedDog } from './rigged_host.js';
 
 // Bootstrap: рендерер, цикл с аккумулятором, ввод, харнесс для покадровой съёмки.
 
@@ -58,12 +59,9 @@ window.__diag = { glLostCount: 0, webgl: (() => {
   } catch { return null; }
 })() };
 
-// Экспериментальная модель доступна только локально и в отдельном staging Pages.
-// Production-host даже с ручным ?riggedDog=1 остаётся на процедурной собаке.
-const isLocal = location.hostname === '127.0.0.1' || location.hostname === 'localhost';
-const isStaging = location.hostname === 'allgrit.github.io'
-  && location.pathname.startsWith('/agility-rush-staging/');
-const wantsRiggedDog = isStaging || (isLocal && params.get('riggedDog') === '1');
+// После staging-приёмки rigged Border является штатной моделью и на production Pages.
+// На localhost он по-прежнему включается явным флагом; неизвестные hosts используют fallback.
+const wantsRiggedDog = shouldUseRiggedDog(location, params);
 
 let dogFactory = null;
 if (wantsRiggedDog) {
@@ -125,7 +123,7 @@ document.getElementById('pause-btn').addEventListener('click', () => game.toggle
 
 // Service Worker: офлайн + бесшовные апдейты (не в харнессе — детерминизм)
 if ('serviceWorker' in navigator && !new URLSearchParams(location.search).has('harness')) {
-  window.addEventListener('load', () => {
+  const registerServiceWorker = () => {
     // updateViaCache:'none' — sw.js всегда качается свежим, минуя HTTP-кэш (важно для Pages)
     navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).then((reg) => {
       reg.update().catch(() => {}); // форсим проверку новой версии при заходе
@@ -147,7 +145,11 @@ if ('serviceWorker' in navigator && !new URLSearchParams(location.search).has('h
         doReload();
       }
     });
-  });
+  };
+  // Rigged GLB загружается через top-level await. Если он завершился уже после
+  // window.load, регистрируем SW сразу, иначе одноразово ждём обычный load.
+  if (document.readyState === 'complete') registerServiceWorker();
+  else window.addEventListener('load', registerServiceWorker, { once: true });
 }
 
 // --- Ввод: клавиатура ---
@@ -192,20 +194,57 @@ window.addEventListener('touchend', (e) => {
 // ТОЛЬКО на localhost: в проде это чит-вектор (накрутка дистанции/лидерборда), поэтому отключено.
 const WARP = parseInt(params.get('warp') || '0', 10);
 if (WARP > 0 && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) game._warpDist = WARP;
+// Кап частоты РЕНДЕРА до 60fps. Логика (update) всё равно фиксированная 60 Гц, а на дисплеях
+// 90/120/144 Гц рендер без капа молотит в 1.5-2.4 раза чаще → GPU перегревается. Кап убирает
+// лишние кадры без потери плавности (60fps достаточно) и заметно снижает нагрев.
+// Через АККУМУЛЯТОР (не порог): усредняет ровно 60 на ЛЮБОЙ частоте экрана без квантования
+// (порог давал 144/3=48fps из-за пропуска «через один»). Update-цикл не трогаем.
+const RENDER_DT_MS = 1000 / 60;
 let accumulator = 0;
 let lastT = performance.now();
+let renderAccum = RENDER_DT_MS; // первый кадр рисуем сразу
 let running = true;
+
+// Оверлей производительности (?perf): реальный FPS/ms на устройстве. Presentation-only,
+// вне игрового цикла — детерминизм не затрагивается.
+const PERF = params.has('perf');
+let perfEl = null, perfFrames = 0, perfWinStart = 0, perfRenderAcc = 0;
+if (PERF) {
+  perfEl = document.createElement('div');
+  perfEl.id = 'perf-overlay';
+  perfEl.style.cssText = 'position:fixed;left:6px;bottom:6px;z-index:70;font:11px/1.35 monospace;color:#9adcff;background:rgba(8,12,24,0.62);padding:3px 8px;border-radius:7px;pointer-events:none;white-space:nowrap;';
+  document.body.appendChild(perfEl);
+}
 
 function frame(now) {
   if (!HARNESS) {
-    const elapsed = Math.min(0.1, (now - lastT) / 1000);
+    const elapsedMs = Math.min(100, now - lastT);
     lastT = now;
-    accumulator += elapsed;
+    accumulator += elapsedMs / 1000;
     while (accumulator >= FIXED_DT) {
       game.update();
       accumulator -= FIXED_DT;
     }
-    renderFrame();
+    // Кап рендера 60fps через аккумулятор: копим реальное время, рисуем при наборе 1/60 с,
+    // остаток переносим → средняя частота ровно 60 на любом экране. При лаге (возврат вкладки)
+    // не копим пачку кадров.
+    renderAccum += elapsedMs;
+    if (renderAccum >= RENDER_DT_MS) {
+      renderAccum = renderAccum > RENDER_DT_MS * 2 ? 0 : renderAccum - RENDER_DT_MS;
+      const r0 = PERF ? performance.now() : 0;
+      renderFrame();
+      if (PERF) {
+        perfRenderAcc += performance.now() - r0;
+        perfFrames++;
+        if (perfWinStart === 0) perfWinStart = now;
+        else if (now - perfWinStart >= 500) {
+          const fps = perfFrames * 1000 / (now - perfWinStart);
+          const mem = renderer.info.memory;
+          perfEl.textContent = `${fps.toFixed(0)} fps · ${(perfRenderAcc / perfFrames).toFixed(1)}ms · geo ${mem.geometries} · tex ${mem.textures} · dpr ${renderer.getPixelRatio()}`;
+          perfFrames = 0; perfRenderAcc = 0; perfWinStart = now;
+        }
+      }
+    }
   }
   if (running) requestAnimationFrame(frame);
 }
