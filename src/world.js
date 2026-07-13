@@ -24,7 +24,6 @@ export class World {
     this.renderer = renderer;
     this.decor = []; // { obj, z } — рециклируемый боковой декор
     this.groundSegs = [];
-    this.crowdSprites = [];
     this.floodlights = [];
     this.time = 0;
     this._buildSky();
@@ -437,82 +436,210 @@ export class World {
     return tex;
   }
 
+  _setBatchInstanceMatrix(mesh, index, x, y, z, rotationX = 0, rotationY = 0, rotationZ = 0) {
+    const scratch = this._batchMatrixScratch;
+    scratch.position.set(x, y, z);
+    scratch.rotation.set(rotationX, rotationY, rotationZ);
+    scratch.scale.set(1, 1, 1);
+    scratch.updateMatrix();
+    mesh.setMatrixAt(index, scratch.matrix);
+  }
+
+  _writeStandStaticMatrices(index) {
+    const marker = this.stands[index];
+    const { x, y, z } = marker.position;
+    const side = marker.userData.side;
+    const batches = this.standBatches;
+    this._setBatchInstanceMatrix(batches.base, index, x, y + 1.2, z);
+    this._setBatchInstanceMatrix(batches.roof, index, x, y + 3.6, z, 0, 0, -side * 0.14);
+    this._setBatchInstanceMatrix(batches.skirt, index, x - side * 1.5, y + 0.45, z);
+    this._setBatchInstanceMatrix(batches.columns, index * 3, x - side * 1.45, y + 1.8, z - 9);
+    this._setBatchInstanceMatrix(batches.columns, index * 3 + 1, x - side * 1.45, y + 1.8, z);
+    this._setBatchInstanceMatrix(batches.columns, index * 3 + 2, x - side * 1.45, y + 1.8, z + 9);
+  }
+
+  _writeStandCrowdMatrix(index) {
+    const marker = this.stands[index];
+    const { x, y, z } = marker.position;
+    const side = marker.userData.side;
+    const breathingY = y + 1.95 + Math.abs(Math.sin(this.time * 3 + index * 1.7)) * 0.06;
+    this._setBatchInstanceMatrix(
+      this.standBatches.crowd,
+      index,
+      x - side * 1.35,
+      breathingY,
+      z,
+      0,
+      side > 0 ? -Math.PI / 2 : Math.PI / 2
+    );
+  }
+
+  _markStandStaticMatricesUpdated() {
+    this.standBatches.base.instanceMatrix.needsUpdate = true;
+    this.standBatches.roof.instanceMatrix.needsUpdate = true;
+    this.standBatches.skirt.instanceMatrix.needsUpdate = true;
+    this.standBatches.columns.instanceMatrix.needsUpdate = true;
+  }
+
+  _syncStandCrowdMatrices() {
+    for (let i = 0; i < this.stands.length; i++) this._writeStandCrowdMatrix(i);
+    this.standBatches.crowd.instanceMatrix.needsUpdate = true;
+  }
+
+  _updateStandBatchBounds() {
+    this.standBatches.base.computeBoundingSphere();
+    this.standBatches.crowd.computeBoundingSphere();
+    this.standBatches.crowd.boundingSphere.radius += 0.06;
+    this.standBatches.roof.computeBoundingSphere();
+    this.standBatches.skirt.computeBoundingSphere();
+    this.standBatches.columns.computeBoundingSphere();
+  }
+
+  _syncAllStandMatrices() {
+    for (let i = 0; i < this.stands.length; i++) this._writeStandStaticMatrices(i);
+    this._markStandStaticMatricesUpdated();
+    this._syncStandCrowdMatrices();
+    this._updateStandBatchBounds();
+  }
+
+  _writeBannerMatrices(index) {
+    const marker = this.banners[index];
+    const { x, y, z } = marker.position;
+    this._setBatchInstanceMatrix(this.bannerBatches.beam, index, x, y + 4.4, z, 0, 0, Math.PI / 2);
+    this._setBatchInstanceMatrix(this.bannerBatches.poles, index * 2, x - (TRACK_HALF + 1.8), y + 2.2, z);
+    this._setBatchInstanceMatrix(this.bannerBatches.poles, index * 2 + 1, x + (TRACK_HALF + 1.8), y + 2.2, z);
+    for (let flagIndex = 0; flagIndex < 11; flagIndex++) {
+      const slot = this._bannerFlagSlots[index][flagIndex];
+      const localX = -TRACK_HALF - 1 + flagIndex * ((TRACK_HALF * 2 + 2) / 10);
+      this._setBatchInstanceMatrix(
+        this.bannerBatches.flags[slot.colorIndex].mesh,
+        slot.instanceIndex,
+        x + localX,
+        y + 4.15,
+        z,
+        Math.PI
+      );
+    }
+  }
+
+  _markBannerMatricesUpdated() {
+    this.bannerBatches.beam.instanceMatrix.needsUpdate = true;
+    this.bannerBatches.poles.instanceMatrix.needsUpdate = true;
+    for (const descriptor of this.bannerBatches.flags) descriptor.mesh.instanceMatrix.needsUpdate = true;
+  }
+
+  _updateBannerBatchBounds() {
+    this.bannerBatches.beam.computeBoundingSphere();
+    this.bannerBatches.poles.computeBoundingSphere();
+    for (const descriptor of this.bannerBatches.flags) descriptor.mesh.computeBoundingSphere();
+  }
+
+  _syncAllBannerMatrices() {
+    for (let i = 0; i < this.banners.length; i++) this._writeBannerMatrices(i);
+    this._markBannerMatricesUpdated();
+    this._updateBannerBatchBounds();
+  }
+
   _buildCrowd() {
     // Трибуны по бокам — рециклируемые блоки с текстурой толпы, чуть «дышат» (машут)
     this.crowdTex = this._crowdTexture();
     this.stands = [];
     for (let i = 0; i < 6; i++) {
       for (const s of [-1, 1]) {
-        const stand = new THREE.Group();
-        // Ступенчатая трибуна (наклонный блок), светлая
-        const base = new THREE.Mesh(
-          new THREE.BoxGeometry(2.6, 2.4, 22),
-          new THREE.MeshStandardMaterial({ color: 0xd8cfc0, roughness: 1, flatShading: true })
-        );
-        base.position.y = 1.2;
-        stand.add(base);
-        const crowd = new THREE.Mesh(
-          new THREE.PlaneGeometry(22, 2.8),
-          new THREE.MeshBasicMaterial({ map: this.crowdTex, transparent: false })
-        );
-        crowd.rotation.y = s > 0 ? -Math.PI / 2 : Math.PI / 2;
-        crowd.position.set(-s * 1.35, 1.95, 0);
-        crowd.rotation.x = 0;
-        stand.add(crowd);
-        this.crowdSprites.push(crowd);
-        // Козырёк
-        const roof = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.12, 22),
-          new THREE.MeshStandardMaterial({ color: 0xe8707a, roughness: 0.8, emissive: 0x30090c }));
-        roof.position.set(0, 3.6, 0);
-        roof.rotation.z = -s * 0.14;
-        stand.add(roof);
-        // Бортик у земли
-        const skirt = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.9, 22),
-          new THREE.MeshStandardMaterial({ color: 0xf0f0f0, roughness: 1 }));
-        skirt.position.set(-s * 1.5, 0.45, 0);
-        stand.add(skirt);
-        // Колонны под козырёк — крыша не «парит»
-        const colMat = new THREE.MeshStandardMaterial({ color: 0xb8bfcc, roughness: 1 });
-        for (const zz of [-9, 0, 9]) {
-          const col = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 3.6, 6), colMat);
-          col.position.set(-s * 1.45, 1.8, zz);
-          stand.add(col);
-        }
-        stand.position.set(s * (TRACK_HALF + 4.4), 0, -i * 44 + 14);
-        stand.userData.z0 = stand.position.z;
-        stand.userData.side = s;
-        this.scene.add(stand);
-        this.stands.push(stand);
+        const marker = new THREE.Object3D();
+        marker.position.set(s * (TRACK_HALF + 4.4), 0, -i * 44 + 14);
+        marker.userData.z0 = marker.position.z;
+        marker.userData.side = s;
+        marker.userData.index = this.stands.length;
+        this.stands.push(marker);
       }
     }
+    this.standBatchRoot = new THREE.Object3D();
+    this.standBatches = {
+      base: new THREE.InstancedMesh(
+        new THREE.BoxGeometry(2.6, 2.4, 22),
+        new THREE.MeshStandardMaterial({ color: 0xd8cfc0, roughness: 1, flatShading: true }),
+        12
+      ),
+      crowd: new THREE.InstancedMesh(
+        new THREE.PlaneGeometry(22, 2.8),
+        new THREE.MeshBasicMaterial({ map: this.crowdTex, transparent: false }),
+        12
+      ),
+      roof: new THREE.InstancedMesh(
+        new THREE.BoxGeometry(3.4, 0.12, 22),
+        new THREE.MeshStandardMaterial({ color: 0xe8707a, roughness: 0.8, emissive: 0x30090c }),
+        12
+      ),
+      skirt: new THREE.InstancedMesh(
+        new THREE.BoxGeometry(0.15, 0.9, 22),
+        new THREE.MeshStandardMaterial({ color: 0xf0f0f0, roughness: 1 }),
+        12
+      ),
+      columns: new THREE.InstancedMesh(
+        new THREE.CylinderGeometry(0.07, 0.09, 3.6, 6),
+        new THREE.MeshStandardMaterial({ color: 0xb8bfcc, roughness: 1 }),
+        36
+      ),
+    };
+    this.standBatchRoot.add(
+      this.standBatches.base,
+      this.standBatches.crowd,
+      this.standBatches.roof,
+      this.standBatches.skirt,
+      this.standBatches.columns
+    );
+    this.scene.add(this.standBatchRoot);
+    this._batchMatrixScratch = new THREE.Object3D();
+    this._syncAllStandMatrices();
     // Флажки-гирлянды над трассой
     this.banners = [];
     for (let i = 0; i < 3; i++) {
-      const banner = new THREE.Group();
-      const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, TRACK_HALF * 2 + 4, 6),
-        new THREE.MeshStandardMaterial({ color: 0xeeeeee }));
-      beam.rotation.z = Math.PI / 2;
-      beam.position.y = 4.4;
-      banner.add(beam);
-      const cols = [0xe05656, 0xf0d05a, 0x56a0e0, 0x7fe056, 0xc77fe0];
-      for (let f = 0; f < 11; f++) {
-        const flag = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.4, 4),
-          new THREE.MeshStandardMaterial({ color: cols[f % cols.length], side: THREE.DoubleSide }));
-        flag.rotation.x = Math.PI;
-        flag.position.set(-TRACK_HALF - 1 + f * ((TRACK_HALF * 2 + 2) / 10), 4.15, 0);
-        banner.add(flag);
-      }
-      for (const s of [-1, 1]) {
-        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 4.4, 6),
-          new THREE.MeshStandardMaterial({ color: 0xdddddd }));
-        pole.position.set(s * (TRACK_HALF + 1.8), 2.2, 0);
-        banner.add(pole);
-      }
-      banner.position.z = -60 - i * 120;
-      banner.userData.z0 = banner.position.z;
-      this.scene.add(banner);
-      this.banners.push(banner);
+      const marker = new THREE.Object3D();
+      marker.position.z = -60 - i * 120;
+      marker.userData.z0 = marker.position.z;
+      marker.userData.index = i;
+      this.banners.push(marker);
     }
+    const flagColors = [0xe05656, 0xf0d05a, 0x56a0e0, 0x7fe056, 0xc77fe0];
+    const flagCounts = [9, 6, 6, 6, 6];
+    const flagGeometry = new THREE.ConeGeometry(0.16, 0.4, 4);
+    this.bannerBatchRoot = new THREE.Object3D();
+    this.bannerBatches = {
+      beam: new THREE.InstancedMesh(
+        new THREE.CylinderGeometry(0.05, 0.05, TRACK_HALF * 2 + 4, 6),
+        new THREE.MeshStandardMaterial({ color: 0xeeeeee }),
+        3
+      ),
+      poles: new THREE.InstancedMesh(
+        new THREE.CylinderGeometry(0.07, 0.07, 4.4, 6),
+        new THREE.MeshStandardMaterial({ color: 0xdddddd }),
+        6
+      ),
+      flags: flagColors.map((color, colorIndex) => ({
+        color: new THREE.Color(color),
+        mesh: new THREE.InstancedMesh(
+          flagGeometry,
+          new THREE.MeshStandardMaterial({ color, side: THREE.DoubleSide }),
+          flagCounts[colorIndex]
+        ),
+      })),
+    };
+    this.bannerBatchRoot.add(
+      this.bannerBatches.beam,
+      this.bannerBatches.poles,
+      ...this.bannerBatches.flags.map(descriptor => descriptor.mesh)
+    );
+    this.scene.add(this.bannerBatchRoot);
+    const nextFlagSlot = [0, 0, 0, 0, 0];
+    this._bannerFlagSlots = Array.from({ length: 3 }, () => Array.from({ length: 11 }));
+    for (let i = 0; i < 3; i++) {
+      for (let f = 0; f < 11; f++) {
+        const colorIndex = f % flagColors.length;
+        this._bannerFlagSlots[i][f] = { colorIndex, instanceIndex: nextFlagSlot[colorIndex]++ };
+      }
+    }
+    this._syncAllBannerMatrices();
     // Деревья для парковых зон (рециклятся вместе с трибунами, видимость по зоне)
     this.trees = [];
     const trunkMat = new THREE.MeshStandardMaterial({ color: 0x7a5230, roughness: 1 });
@@ -699,18 +826,37 @@ export class World {
       if (seg.position.z > dogZ + this.segLen * 1.5) seg.position.z -= this.segLen * this.groundSegs.length;
     }
     // Рецикл трибун / деревьев / гирлянд / прожекторов
-    for (const st of this.stands) {
-      if (st.position.z > dogZ + 30) st.position.z -= 44 * 6;
-      st.visible = (this.currentZone === 'stadium' || this.currentZone === 'night');
+    let standRecycled = false;
+    for (let i = 0; i < this.stands.length; i++) {
+      const marker = this.stands[i];
+      if (marker.position.z > dogZ + 30) {
+        marker.position.z -= 44 * 6;
+        this._writeStandStaticMatrices(i);
+        standRecycled = true;
+      }
     }
+    this.standBatchRoot.visible = this.currentZone === 'stadium' || this.currentZone === 'night';
+    if (standRecycled) this._markStandStaticMatricesUpdated();
+    this._syncStandCrowdMatrices();
+    if (standRecycled) this._updateStandBatchBounds();
     for (const tr of this.trees) {
       if (tr.position.z > dogZ + 26) tr.position.z -= 26 * 14;
       tr.visible = (this.currentZone === 'park' || this.currentZone === 'sunset');
       // лёгкое покачивание кроны
       tr.rotation.z = Math.sin(this.time * 1.3 + tr.position.z) * 0.02;
     }
-    for (const b of this.banners) {
-      if (b.position.z > dogZ + 20) b.position.z -= 120 * 3;
+    let bannerRecycled = false;
+    for (let i = 0; i < this.banners.length; i++) {
+      const marker = this.banners[i];
+      if (marker.position.z > dogZ + 20) {
+        marker.position.z -= 120 * 3;
+        this._writeBannerMatrices(i);
+        bannerRecycled = true;
+      }
+    }
+    if (bannerRecycled) {
+      this._markBannerMatricesUpdated();
+      this._updateBannerBatchBounds();
     }
     for (const f of this.floodlights) {
       if (f.position.z > dogZ + 30) f.position.z -= 90 * 4;
@@ -746,11 +892,6 @@ export class World {
       for (const wing of b.children) wing.rotation.y = wing.userData.side * flap;
       b.visible = this.currentZone === 'park' || this.currentZone === 'sunset';
     }
-    // Толпа «дышит»
-    for (let i = 0; i < this.crowdSprites.length; i++) {
-      const c = this.crowdSprites[i];
-      c.position.y = 1.95 + Math.abs(Math.sin(this.time * 3 + i * 1.7)) * 0.06;
-    }
   }
 
   // Сдвиг всего мира на +dz для сохранения точности float (rebase)
@@ -765,6 +906,8 @@ export class World {
     for (const b of this.butterflies) b.position.z += dz;
     for (const t of this.tents) t.position.z += dz;
     this.birds.position.z += dz;
+    this._syncAllStandMatrices();
+    this._syncAllBannerMatrices();
   }
 
   // Полный сброс мира к старту нового забега: все рециклируемые объекты — на исходные позиции
@@ -780,5 +923,7 @@ export class World {
     this.birds.position.set(8, 0, -70);
     this.sky.position.z = 0;
     this.clouds.position.z = 0;
+    this._syncAllStandMatrices();
+    this._syncAllBannerMatrices();
   }
 }
