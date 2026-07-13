@@ -689,21 +689,39 @@ function glintTexture() {
   return _glintTex;
 }
 
-export function buildCookie(lane, z, y = 0.5, dx = 0, gold = false) {
-  const g = new THREE.Group();
-  const mat = gold
-    ? std(0xffc93d, { roughness: 0.3, emissive: 0x8a5c08 })
-    : std(0xe8b355, { roughness: 0.45, emissive: 0x3a2708 });
-  if (gold) g.scale.setScalar(1.22);
-  // Косточка: цилиндр + 4 шарика
-  const mid = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.16, 8), mat);
-  mid.rotation.z = Math.PI / 2;
-  g.add(mid);
+// Тело косточки (цилиндр + 4 шарика) слито в ОДНУ общую геометрию: 5 мешей → 1 draw на косточку.
+// Геометрия и материалы общие (userData.shared) — строятся раз, disposeGroup их не трогает.
+function mergeParts(geos) {
+  const parts = geos.map(g => (g.index ? g.toNonIndexed() : g));
+  let total = 0;
+  for (const g of parts) total += g.attributes.position.array.length;
+  const pos = new Float32Array(total), norm = new Float32Array(total);
+  let off = 0;
+  for (const g of parts) { pos.set(g.attributes.position.array, off); norm.set(g.attributes.normal.array, off); off += g.attributes.position.array.length; }
+  const m = new THREE.BufferGeometry();
+  m.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  m.setAttribute('normal', new THREE.BufferAttribute(norm, 3));
+  return m;
+}
+let _cookieGeo = null, _cookieMat = null, _cookieMatGold = null;
+function cookieShared() {
+  if (_cookieGeo) return;
+  const cyl = new THREE.CylinderGeometry(0.05, 0.05, 0.16, 8); cyl.rotateZ(Math.PI / 2);
+  const parts = [cyl];
   for (const [x, yy] of [[-0.09, 0.045], [-0.09, -0.045], [0.09, 0.045], [0.09, -0.045]]) {
-    const ball = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 6), mat);
-    ball.position.set(x, yy, 0);
-    g.add(ball);
+    const s = new THREE.SphereGeometry(0.055, 8, 6); s.translate(x, yy, 0); parts.push(s);
   }
+  _cookieGeo = mergeParts(parts); _cookieGeo.computeBoundingSphere(); _cookieGeo.userData.shared = true;
+  _cookieMat = std(0xe8b355, { roughness: 0.45, emissive: 0x3a2708 }); _cookieMat.userData.shared = true;
+  _cookieMatGold = std(0xffc93d, { roughness: 0.3, emissive: 0x8a5c08 }); _cookieMatGold.userData.shared = true;
+}
+
+export function buildCookie(lane, z, y = 0.5, dx = 0, gold = false) {
+  cookieShared();
+  const g = new THREE.Group();
+  if (gold) g.scale.setScalar(1.22);
+  // Косточка: одно слитое тело (общая геометрия/материал)
+  g.add(new THREE.Mesh(_cookieGeo, gold ? _cookieMatGold : _cookieMat));
   // Глинт-звёздочка: периодическая вспышка, чтобы косточку хотелось взять
   const glint = new THREE.Sprite(new THREE.SpriteMaterial({
     map: glintTexture(), transparent: true, opacity: 0,

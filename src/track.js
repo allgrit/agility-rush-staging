@@ -17,13 +17,14 @@ const CHUNK = 34; // метров на чанк
 function disposeGroup(group) {
   if (!group) return;
   group.traverse((o) => {
-    if (o.geometry) o.geometry.dispose();
+    // ВАЖНО: общие (shared) ресурсы НЕ диспозим — их переиспользуют другие сущности.
+    // Напр. _glintTex, слитая геометрия/материал косточки (модульные синглтоны) — их dispose
+    // сломал бы все последующие косточки (перф-churn + визбаг). Помечаем shared через userData.
+    // !o.isSprite — у всех THREE.Sprite общая модульная геометрия, её диспозить нельзя (churn/поломка)
+    if (o.geometry && !o.geometry.userData.shared && !o.isSprite) o.geometry.dispose();
     if (o.material) {
       const mats = Array.isArray(o.material) ? o.material : [o.material];
-      // ВАЖНО: общие (shared) текстуры НЕ диспозим — их используют другие сущности.
-      // Напр. _glintTex (блик косточки) — модульный синглтон; его dispose рушил блик у всех
-      // последующих косточек (перф-churn + визуальный баг). Помечаем shared через userData.
-      for (const m of mats) { if (m && m.map && !m.map.userData.shared) m.map.dispose(); if (m) m.dispose(); }
+      for (const m of mats) { if (m && m.map && !m.map.userData.shared) m.map.dispose(); if (m && !m.userData.shared) m.dispose(); }
     }
   });
 }
