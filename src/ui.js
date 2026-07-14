@@ -766,7 +766,8 @@ export class UI {
     // Виньетка/спидлайны — диффим
     const dOp = state.danger ? 0.5 : 0;
     if (dOp !== h.danger) { h.danger = dOp; this.vignette.style.opacity = dOp; }
-    const sOp = state.boost ? 0.6 : 0;
+    // Speed-lines: буст — ярко; высокая скорость — плавно по мере разгона (juice #27)
+    const sOp = state.boost ? 0.7 : Math.round((state.speedNorm || 0) * 45) / 100;
     if (sOp !== h.boost) { h.boost = sOp; this.speedlines.style.opacity = sOp; }
   }
 

@@ -150,6 +150,20 @@ export class Meta {
 
   // Миграция старых сохранений на бесконечные миссии (раньше был конечный пул из 10).
   _migrate(d) {
+    // Устойчивость к частичным/битым сейвам: базовые поля добираем дефолтами,
+    // иначе повреждённый localStorage кладёт игру на старте (crash в showMenu).
+    d.cookies = d.cookies || 0;
+    d.totalScore = d.totalScore || 0;
+    d.bestScore = d.bestScore || 0;
+    d.bestDistance = d.bestDistance || 0;
+    d.runs = d.runs || 0;
+    d.tokens = d.tokens || 0;
+    d.missionsCompleted = d.missionsCompleted || 0;
+    d.lastGiftTs = d.lastGiftTs || 0;
+    if (!Array.isArray(d.unlocked) || !d.unlocked.length) d.unlocked = ['border'];
+    if (!d.selectedDog || !d.unlocked.includes(d.selectedDog)) d.selectedDog = d.unlocked[0];
+    if (d.playerName == null) d.playerName = '';
+    if (d.scoreMult == null) d.scoreMult = 1;
     if (d.missionSeq == null || (d.missions && d.missions[0] && d.missions[0].stat === undefined)) {
       const seq = d.missionsCompleted || 0;
       d.missions = [genMission(seq), genMission(seq + 1), genMission(seq + 2)];

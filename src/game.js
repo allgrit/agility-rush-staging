@@ -566,6 +566,9 @@ export class Game {
     hs.powerupMax = this.powerupMax; // (безопасно, как и было до диффинга)
     hs.danger = this.judgeT > 0;
     hs.boost = this.boostT > 0 || this.flyT > 0 || this.tableBoostT > 0;
+    // Juice (#27): speed-lines растут с реальной скоростью (0 до 18 м/с → максимум к 26),
+    // не только при бусте. Чисто презентационная величина.
+    hs.speedNorm = Math.max(0, Math.min(1, (d.speed - 18) / 8));
     hs.metaMult = this.metaMult || 1;
     hs.tokens = this.meta.data.tokens || 0;
     this.ui.updateHUD(hs);
@@ -1310,9 +1313,13 @@ export class Game {
     if (grade === 'perfect') {
       pts *= SCORE_PERFECT_MULT;
       this.runStats.perfects++;
+      // Juice (#27, F6): hit-stop 40 мс — «мясо» лучшего момента игры (раньше был только
+      // на смерти). Механизм hitstopT уже детерминирован (фриз тиков одинаков между прогонами).
+      this.hitstopT = Math.max(this.hitstopT, 0.04);
       this.slowmoT = Math.max(this.slowmoT, 0.16);
       this.rig.punch(1);
       this.audio.perfect();
+      this.world.cheer(d.z, 1); // трибуны ликуют (juice #27)
       this.popups.perfect();
       this.fx.perfectBurst(new THREE.Vector3(d.x, d.y + 0.6, d.z));
       this.fx.shockwave(new THREE.Vector3(d.x, Math.max(0.15, d.y * 0.5), d.z));
@@ -1328,6 +1335,7 @@ export class Game {
     // Вехи комбо
     if (this.milestones.includes(this.combo)) {
       this.rig.rollPulse();
+      this.world.cheer(this.dog.z, 1.4); // большая волна на комбо-веху (juice #27)
       this.audio.comboMilestone(this.combo);
       this.popups.combo(this.combo);
       this.fx.confetti(new THREE.Vector3(d.x, 1.4, d.z - 2));

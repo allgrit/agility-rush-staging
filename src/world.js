@@ -26,6 +26,9 @@ export class World {
     this.groundSegs = [];
     this.floodlights = [];
     this.time = 0;
+    // Juice (#27): волна ликования трибун на perfect/комбо-майлстоун (чисто render-слой)
+    this.cheerT = 0;
+    this.cheerZ = 0;
     this._buildSky();
     this._buildLights();
     this._buildGround();
@@ -390,6 +393,85 @@ export class World {
       this.scene.add(b);
       this.butterflies.push(b);
     }
+
+    this._buildSideProps();
+  }
+
+  // Juice (#27, F5): уплотнение среднего плана — recycle-пул боковых пропов
+  // (соревновательные флажки + судейские стойки). Два InstancedMesh — почти
+  // бесплатно по draw calls (perf-guard следит). Позиции — чистая функция слота
+  // (hash), БЕЗ rng: детерминизм и rebase-независимость через дистанцию.
+  _buildSideProps() {
+    const flagGeo = new THREE.BufferGeometry();
+    {
+      // Шест + треугольный флажок одной геометрией (позиции руками — без merge-утилит)
+      const pole = new THREE.BoxGeometry(0.05, 1.5, 0.05);
+      pole.translate(0, 0.75, 0);
+      const flag = new THREE.BufferGeometry();
+      flag.setAttribute('position', new THREE.Float32BufferAttribute([
+        0, 1.5, 0, 0.5, 1.34, 0, 0, 1.18, 0,
+        0, 1.5, 0, 0, 1.18, 0, 0.5, 1.34, 0, // обратная сторона
+      ], 3));
+      flag.computeVertexNormals();
+      const merged = [pole, flag];
+      // Простое склеивание атрибутов position/normal
+      let total = 0;
+      for (const g of merged) total += g.attributes.position.count;
+      const pos = new Float32Array(total * 3), nor = new Float32Array(total * 3);
+      let o = 0;
+      for (const g of merged) {
+        pos.set(g.attributes.position.array, o * 3);
+        nor.set(g.attributes.normal.array, o * 3);
+        o += g.attributes.position.count;
+      }
+      flagGeo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      flagGeo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+    }
+    const FLAGS = 36, POSTS = 12;
+    this.sideFlags = new THREE.InstancedMesh(flagGeo,
+      new THREE.MeshLambertMaterial({ color: 0xd8434e, flatShading: true }), FLAGS);
+    // Судейская стойка: столбик с «табличкой»
+    const postGeo = new THREE.BoxGeometry(0.4, 0.9, 0.12);
+    postGeo.translate(0, 0.45, 0);
+    this.sidePosts = new THREE.InstancedMesh(postGeo,
+      new THREE.MeshLambertMaterial({ color: 0xf0ead8, flatShading: true }), POSTS);
+    this.sideFlags.frustumCulled = false; // короткая лента вдоль трассы, куллинг не окупается
+    this.sidePosts.frustumCulled = false;
+    this.scene.add(this.sideFlags);
+    this.scene.add(this.sidePosts);
+    this._propMtx = new THREE.Matrix4();
+    this._propScaleV = new THREE.Vector3(); // scratch — без new каждый кадр (перф-конвенция #8)
+  }
+
+  // Детерминированный «рандом» слота: hash без состояния (никакого rng)
+  _slotHash(n) {
+    let h = (n | 0) * 2654435761;
+    h = (h ^ (h >>> 16)) >>> 0;
+    return (h % 1000) / 1000;
+  }
+
+  _updateSideProps(dogZ, dist) {
+    const FLAG_STEP = 11, POST_STEP = 42;
+    const write = (mesh, count, step, xBase, yScaleVar) => {
+      const firstSlot = Math.floor(dist / step) - 1;
+      for (let i = 0; i < count; i++) {
+        const slot = firstSlot + i;
+        const h = this._slotHash(slot * 7 + step);
+        const side = (slot % 2 === 0) ? 1 : -1;
+        const x = side * (xBase + h * 2.2);
+        // Мировая z из дистанции слота: rebase-безопасно (dogZ и dist двигаются синхронно)
+        const z = dogZ - (slot * step - dist);
+        const sc = 0.85 + yScaleVar * h;
+        this._propMtx.makeRotationY(h * 6.28);
+        this._propScaleV.set(1, sc, 1);
+        this._propMtx.scale(this._propScaleV);
+        this._propMtx.setPosition(x, 0, z);
+        mesh.setMatrixAt(i, this._propMtx);
+      }
+      mesh.instanceMatrix.needsUpdate = true;
+    };
+    write(this.sideFlags, 36, FLAG_STEP, TRACK_HALF + 2.4, 0.5);
+    write(this.sidePosts, 12, POST_STEP, TRACK_HALF + 3.6, 0.25);
   }
 
   _bannerTexture() {
@@ -463,7 +545,13 @@ export class World {
     const marker = this.stands[index];
     const { x, y, z } = marker.position;
     const side = marker.userData.side;
-    const breathingY = y + 1.95 + Math.abs(Math.sin(this.time * 3 + index * 1.7)) * 0.06;
+    let breathingY = y + 1.95 + Math.abs(Math.sin(this.time * 3 + index * 1.7)) * 0.06;
+    if (this.cheerT > 0) {
+      // Волна бежит от эпицентра: ближние трибуны прыгают первыми и выше
+      const dist = Math.abs(z - this.cheerZ);
+      const phase = this.time * 14 - dist * 0.22;
+      breathingY += Math.max(0, Math.sin(phase)) * 0.85 * this.cheerT * Math.exp(-dist / 45);
+    }
     this._setBatchInstanceMatrix(
       this.standBatches.crowd,
       index,
@@ -803,8 +891,17 @@ export class World {
     if (this.renderer) this.renderer.toneMappingExposure = za.expo + (zb.expo - za.expo) * t;
   }
 
+  // Толпа ликует: волна подпрыгивания расходится от эпицентра (позиция собаки).
+  // Презентация: не трогает RNG/логику, затухает сама.
+  cheer(z, strength = 1) {
+    this.cheerT = Math.max(this.cheerT, 1.1 * strength);
+    this.cheerZ = z;
+  }
+
   update(dt, dogZ, dist) {
     this.time += dt;
+    if (this.cheerT > 0) this.cheerT -= dt;
+    this._updateSideProps(dogZ, dist);
     // Плавный переход зон в последние 12% зоны
     const { idx, frac } = this.zoneAt(dist);
     const za = ZONES[idx], zb = ZONES[(idx + 1) % ZONES.length];
