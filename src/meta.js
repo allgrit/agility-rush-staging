@@ -140,6 +140,7 @@ export class Meta {
       week: { streak: 0, lastDay: null, claimedDay: null, freezeWeek: null }, // недельный стрик заходов
       scoreV: 2,          // версия шкалы счёта (сезон 2)
       seenSeason2: false, // разовый диалог о старте Сезона 2
+      seenS2Warn: false,  // разовое предупреждение «завтра сброс» (до старта)
     };
   }
 
@@ -174,6 +175,7 @@ export class Meta {
       d.scoreV = 2;
     }
     if (d.seenSeason2 === undefined) d.seenSeason2 = false;
+    if (d.seenS2Warn === undefined) d.seenS2Warn = false;
     // Ретеншн-пакет: счётчики ачивок, клеймы, недельный стрик
     if (!d.achCounters) d.achCounters = {};
     if (!d.achClaimed) d.achClaimed = {};

@@ -303,6 +303,11 @@ export class UI {
         sb.style.display = 'block';
         sb.innerHTML = '⏳ Завтра — старт <b>Сезона 2</b>! Рейтинг начнётся заново, а этот топ навсегда останется в «Зале славы».';
       }
+      // Предупреждение при ВХОДЕ (не только в табе «Топ»): игрок должен узнать о сбросе заранее
+      if (resp.activeSeason === 1 && !this.meta.data.seenS2Warn) {
+        this.meta.data.seenS2Warn = true; this.meta.save();
+        this.showSeasonWarnDialog();
+      }
       if (resp.activeSeason === 2 && !this.meta.data.seenSeason2) {
         this.meta.data.seenSeason2 = true; this.meta.save();
         this.showSeasonDialog();
@@ -400,6 +405,25 @@ export class UI {
   hideDogLoading() {
     const el = document.getElementById('dog-loading');
     if (el) el.style.display = 'none';
+  }
+
+  // Предсезонное предупреждение (показывается при входе, один раз, пока идёт Сезон 1):
+  // игрок узнаёт о завтрашнем сбросе рейтинга ДО того, как увидит пустой топ.
+  showSeasonWarnDialog() {
+    const el = document.createElement('div');
+    el.id = 'season-dialog';
+    el.innerHTML = `<div class="season-card">
+      <div class="season-head">⏳ Завтра — Сезон 2!</div>
+      <div class="season-body">
+        <p>С полуночи стартует <b>новый сезон</b>: счёт станет честнее, а рейтинг <b>начнётся заново у всех</b>.</p>
+        <p>Нынешний топ не пропадёт — он навсегда сохранится в <b>🏆 Зале славы</b> (вкладка «Топ»).</p>
+        <p>Успей поставить рекорд Сезона 1 — сегодня последний день!</p>
+      </div>
+      <button class="menu-btn" id="season-ok">Понятно, бегу!</button>
+    </div>`;
+    document.body.appendChild(el);
+    el.querySelector('#season-ok').addEventListener('click', () => el.remove());
+    track('season2_warn', {});
   }
 
   // Разовый диалог о старте Сезона 2: объясняет пустой рейтинг, Зал славы и компенсацию —
