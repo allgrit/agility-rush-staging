@@ -90,9 +90,8 @@ export class UI {
         </div>
         <button class="start-btn" id="start-btn">СТАРТ</button>
         <div class="controls-hint">← → полосы · ↑ прыжок · ↓ подкат</div>
-        <!-- Панель «Задания»: недельный стрик + миссии + слово дня + дейлики -->
+        <!-- Панель «Задания»: миссии + слово дня + дейлики -->
         <div class="meta-panel on" data-panel="quests">
-          ${this._weekWidgetHtml(week)}
           <div class="missions">
             ${missions.map(m => {
               const best = Math.min(m.best, m.target);
@@ -120,8 +119,9 @@ export class UI {
             ).join('')}</div>`;
           })()}
         </div>
-        <!-- Панель «Награды»: подарок-миска + статистика -->
+        <!-- Панель «Награды»: недельный стрик + подарок-миска + статистика -->
         <div class="meta-panel" data-panel="rewards">
+          ${this._weekWidgetHtml(week)}
           <div class="gift-row" id="gift-row">
             ${this.meta.giftReady()
               ? '<button class="gift-btn" id="gift-btn">🎁 Миска корма — забрать!</button>'
@@ -149,7 +149,7 @@ export class UI {
         <div class="menu-nav" id="menu-nav">
           <button data-nav="quests" class="on"><span class="nic">🎯</span><span class="nlb">Задания</span>${dailyLeft > 0 ? `<span class="nbadge">${dailyLeft}</span>` : ''}</button>
           <button data-nav="ach"><span class="nic">🏆</span><span class="nlb">Ачивки</span>${achClaimable > 0 ? `<span class="nbadge">${achClaimable}</span>` : ''}</button>
-          <button data-nav="rewards"><span class="nic">🎁</span><span class="nlb">Награды</span>${this.meta.giftReady() ? '<span class="nbadge">!</span>' : ''}</button>
+          <button data-nav="rewards"><span class="nic">🎁</span><span class="nlb">Награды</span>${(!week.claimed || this.meta.giftReady()) ? '<span class="nbadge">!</span>' : ''}</button>
           <button data-nav="top"><span class="nic">🏅</span><span class="nlb">Топ</span>${(!d.playerName && d.bestScore > 0) ? '<span class="nbadge">!</span>' : ''}</button>
           <button data-nav="shop" id="shop-open"><span class="nic">🛍</span><span class="nlb">Магазин</span></button>
         </div>
@@ -223,7 +223,12 @@ export class UI {
         track('week_claim', { day: r.dayIdx, amount: r.amount, item: r.bonusItem ? r.bonusItem.id : '' });
         const itemName = r.bonusItem ? (itemOf(r.bonusItem.slot, r.bonusItem.id) || {}).name : null;
         weekBtn.outerHTML = `<div class="week-done">🎉 +${r.amount} 🦴${itemName ? ` + бандана «${itemName}»!` : '!'}</div>`;
-        setTimeout(() => this.showMenu(this._onStart, this._onSelectDog), 1600);
+        setTimeout(() => {
+          this.showMenu(this._onStart, this._onSelectDog);
+          // Игрок был в «Наградах» — возвращаем его туда после перерисовки
+          const b = this.menuEl.querySelector('.menu-nav button[data-nav="rewards"]');
+          if (b) b.click();
+        }, 1600);
       });
     }
     // Клеймы ачивок (кнопки в панели «Ачивки»)
@@ -424,8 +429,10 @@ export class UI {
       const coats = cat.filter(i => i.slot === 'coat'), necks = cat.filter(i => i.slot === 'neck');
       el.innerHTML = `<div class="shop-card">
         <div class="shop-head"><span class="shop-title">🛍 Магазин</span><span class="shop-bal">🦴 ${bal.toLocaleString('ru')}</span></div>
-        <div class="shop-sec">🎨 Окрасы</div><div class="shop-grid">${coats.map(itemHtml).join('')}</div>
-        <div class="shop-sec">🧣 Банданы</div><div class="shop-grid">${necks.map(itemHtml).join('')}</div>
+        <div class="shop-body">
+          <div class="shop-sec">🎨 Окрасы</div><div class="shop-grid">${coats.map(itemHtml).join('')}</div>
+          <div class="shop-sec">🧣 Банданы</div><div class="shop-grid">${necks.map(itemHtml).join('')}</div>
+        </div>
         <button class="menu-btn shop-close" id="shop-close">Закрыть</button>
       </div>`;
       for (const node of el.querySelectorAll('.shop-item')) {

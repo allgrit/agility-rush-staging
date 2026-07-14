@@ -8,8 +8,8 @@
   // Bootstrap-версия: index.html грузится всегда свежим (network-first / без SW),
   // поэтому знает актуальную сборку. Если у игрока в кэше старьё — один раз чистим
   // все кэши, разрегистрируем старый SW и перезагружаемся. Разрывает «залипание» SW.
-  window.__BUILD = 'staging-v18-retention';
-  window.__CACHE = 'agility-staging-v14'; // должно совпадать с VERSION в sw.js
+  window.__BUILD = 'staging-v19-ui-fixes';
+  window.__CACHE = 'agility-staging-v15'; // должно совпадать с VERSION в sw.js
   (function () {
     try {
       var qs = new URLSearchParams(location.search);
@@ -271,10 +271,13 @@
   .shop-title { color: #ffd587; font-size: 19px; font-weight: 900; }
   .shop-bal { color: #ffe0a8; font-size: 14px; font-weight: 800; }
   .shop-sec { color: #9db4d4; font-size: 12px; font-weight: 700; margin: 8px 2px 5px; text-transform: uppercase; letter-spacing: 1px; }
-  .shop-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; overflow-y: auto; }
+  /* Один общий скролл тела магазина (двойные скроллбары на сетках — убраны) */
+  .shop-body { overflow-y: auto; flex: 1; min-height: 0; padding-right: 4px; }
+  .shop-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .shop-item {
     display: flex; align-items: center; gap: 9px; padding: 8px 9px; border-radius: 12px;
     background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); cursor: pointer;
+    min-width: 0; /* grid-колонка обязана ужиматься: иначе nowrap-имена распирают сетку за карточку */
   }
   .shop-item:hover { border-color: rgba(255,213,135,0.4); }
   .shop-item.equipped { border-color: #7fe056; background: rgba(127,224,86,0.1); }
@@ -443,7 +446,7 @@
     width: min(480px, 94vw); max-height: 96vh; overflow-y: auto;
     -webkit-overflow-scrolling: touch;
     background: rgba(14,22,38,0.88); border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 22px; padding: 16px 22px; text-align: center;
+    border-radius: 22px; padding: 16px 22px 0; text-align: center;
     box-shadow: 0 24px 80px rgba(0,0,0,0.5);
     backdrop-filter: blur(6px);
     scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.3) transparent;
@@ -502,7 +505,15 @@
   .meta-panel.on { display: block; animation: metaIn .18s ease; }
   @keyframes metaIn { from { opacity: 0; transform: translateY(4px); } }
   .meta-panel .missions { margin-top: 0; }
-  .menu-nav { display: flex; gap: 6px; margin: 10px -8px 0; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.09); }
+  /* Табы прилипают к низу карточки: при скролле меты навигация всегда видна,
+     скроллится только контент над ней. */
+  .menu-nav {
+    display: flex; gap: 6px; margin: 10px -22px 0; padding: 8px 14px 10px;
+    border-top: 1px solid rgba(255,255,255,0.09);
+    position: sticky; bottom: 0; z-index: 3;
+    background: rgba(14,22,38,0.97); backdrop-filter: blur(6px);
+    border-radius: 0 0 20px 20px;
+  }
   .menu-nav button { flex: 1; position: relative; background: none; border: none; color: #7f93b4;
     padding: 6px 2px 3px; font-family: inherit; cursor: pointer; transition: color .15s; }
   .menu-nav button.on { color: #ffd587; }
