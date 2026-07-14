@@ -1,8 +1,9 @@
-import { DOG_SHOP, TITLES, plural } from './meta.js';
+import { DOG_SHOP, TITLES, plural, WEEK_REWARDS } from './meta.js';
 import { fetchTop, submitScore } from './leaderboard.js';
 import { track } from './analytics.js';
 import { APP_VERSION } from './version.js';
-import { catalog, RARITY, priceOf } from './cosmetics.js';
+import { catalog, RARITY, priceOf, itemOf } from './cosmetics.js';
+import { ACH_SECTIONS, ACH_REWARDS, fmtVal } from './achievements.js';
 
 // Весь HUD и меню — DOM поверх канваса: чётче текст, дешевле анимации (CSS).
 
@@ -53,6 +54,8 @@ export class UI {
     const missions = this.meta.activeMissions();
     // Бейдж на вкладке «Задания» — сколько дневных заданий ещё не выполнено сегодня
     const dailyLeft = this.meta.activeDailyMissions().filter(m => !m.done).length;
+    const week = this.meta.weekState();
+    const achClaimable = this.meta.achClaimableCount();
     this.menuEl.innerHTML = `
       <div class="menu-card">
         <div class="hero tappable" id="hero-play">
@@ -87,8 +90,9 @@ export class UI {
         </div>
         <button class="start-btn" id="start-btn">СТАРТ</button>
         <div class="controls-hint">← → полосы · ↑ прыжок · ↓ подкат</div>
-        <!-- Панель «Задания»: миссии + слово дня + дейлики -->
+        <!-- Панель «Задания»: недельный стрик + миссии + слово дня + дейлики -->
         <div class="meta-panel on" data-panel="quests">
+          ${this._weekWidgetHtml(week)}
           <div class="missions">
             ${missions.map(m => {
               const best = Math.min(m.best, m.target);
@@ -131,6 +135,8 @@ export class UI {
           </div>
           <a class="diary-link" href="https://vk.com/chloe.myaussie" target="_blank" rel="noopener">🐾 Дневник Хлои <span class="vk">ВКонтакте ›</span></a>
         </div>
+        <!-- Панель «Ачивки»: накопительные цели за карьеру, клейм наград -->
+        <div class="meta-panel" data-panel="ach">${this._achPanelHtml()}</div>
         <!-- Панель «Топ»: онлайн-лидерборд + ник + соперники -->
         <div class="meta-panel" data-panel="top">
           <div class="rivals" id="rivals">
@@ -142,6 +148,7 @@ export class UI {
         <!-- Нижняя навигация с бейджами -->
         <div class="menu-nav" id="menu-nav">
           <button data-nav="quests" class="on"><span class="nic">🎯</span><span class="nlb">Задания</span>${dailyLeft > 0 ? `<span class="nbadge">${dailyLeft}</span>` : ''}</button>
+          <button data-nav="ach"><span class="nic">🏆</span><span class="nlb">Ачивки</span>${achClaimable > 0 ? `<span class="nbadge">${achClaimable}</span>` : ''}</button>
           <button data-nav="rewards"><span class="nic">🎁</span><span class="nlb">Награды</span>${this.meta.giftReady() ? '<span class="nbadge">!</span>' : ''}</button>
           <button data-nav="top"><span class="nic">🏅</span><span class="nlb">Топ</span>${(!d.playerName && d.bestScore > 0) ? '<span class="nbadge">!</span>' : ''}</button>
           <button data-nav="shop" id="shop-open"><span class="nic">🛍</span><span class="nlb">Магазин</span></button>
@@ -207,6 +214,34 @@ export class UI {
         }
       });
     }
+    // Клейм недельного стрика
+    const weekBtn = this.menuEl.querySelector('#week-claim');
+    if (weekBtn) {
+      weekBtn.addEventListener('click', () => {
+        const r = this.meta.claimWeek();
+        if (!r) return;
+        track('week_claim', { day: r.dayIdx, amount: r.amount, item: r.bonusItem ? r.bonusItem.id : '' });
+        const itemName = r.bonusItem ? (itemOf(r.bonusItem.slot, r.bonusItem.id) || {}).name : null;
+        weekBtn.outerHTML = `<div class="week-done">🎉 +${r.amount} 🦴${itemName ? ` + бандана «${itemName}»!` : '!'}</div>`;
+        setTimeout(() => this.showMenu(this._onStart, this._onSelectDog), 1600);
+      });
+    }
+    // Клеймы ачивок (кнопки в панели «Ачивки»)
+    this.menuEl.querySelectorAll('.ach-claim[data-claim]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.claim;
+        const amount = this.meta.claimAchievement(id);
+        if (!amount) return;
+        track('achievement_claim', { ach: id, amount });
+        btn.outerHTML = `<div class="week-done">🎉 +${amount} 🦴</div>`;
+        setTimeout(() => {
+          this.showMenu(this._onStart, this._onSelectDog);
+          // Возвращаемся на таб ачивок после перерисовки
+          const b = this.menuEl.querySelector('.menu-nav button[data-nav="ach"]');
+          if (b) b.click();
+        }, 1200);
+      });
+    });
     for (const card of this.menuEl.querySelectorAll('.dog-card')) {
       card.addEventListener('click', () => {
         onSelectDog(card.dataset.dog);
@@ -296,6 +331,71 @@ export class UI {
   _esc(s) { return String(s).replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c])); }
 
   // Магазин косметики (sink для косточек). onChange — применить/обновить (пересоздать собаку).
+  // Виджет недельного стрика заходов (loss-aversion крючок, панель «Задания»)
+  _weekWidgetHtml(week) {
+    const days = WEEK_REWARDS.map((rw, i) => {
+      const idx = i + 1;
+      const got = idx < week.dayIdx || (idx === week.dayIdx && week.claimed);
+      const today = idx === week.dayIdx && !week.claimed;
+      return `<div class="wday ${got ? 'got' : ''} ${today ? 'today' : ''}">
+        <div class="wc">${idx === 7 ? '<span class="wbig">🎁</span>' : ''}<span class="wrw">${rw}</span>${idx === 7 ? '' : '🦴'}</div>
+        <div class="wdl">${today ? 'сегодня' : 'д. ' + idx}</div>
+      </div>`;
+    }).join('');
+    return `<div class="week-card">
+      <div class="week-head">
+        <span class="week-title">🔥 Серия заходов: ${week.streak} ${plural(week.streak, ['день', 'дня', 'дней'])}${week.frozen ? ' ❄' : ''}</span>
+        <span class="wfreeze" title="Заморозка спасает серию при пропуске дня">❄ ${week.freezeLeft ? '1' : '0'}</span>
+      </div>
+      <div class="wdays">${days}</div>
+      ${week.claimed
+        ? '<div class="week-done">✓ Награда дня получена</div>'
+        : `<button class="week-claim" id="week-claim">Забрать ${week.reward} 🦴</button>`}
+    </div>`;
+  }
+
+  // Панель «Ачивки»: секции → карточки с ярусами/прогрессом/клеймом
+  _achPanelHtml() {
+    const list = this.meta.achievements();
+    const card = (a) => {
+      const d = a.def;
+      const revealed = !d.hidden || a.tier > 0 || a.claimed > 0;
+      const tierDots = [0, 1, 2].map(t =>
+        `<span class="atier ${t < a.tier ? (t === 2 ? 'gold' : t === 1 ? 'silver' : 'bronze') : ''}"></span>`).join('');
+      if (!revealed) {
+        return `<div class="ach hidden-ach">
+          <img src="./assets/ach/${d.icon}-t.png" alt="" loading="lazy">
+          <div class="ach-name">? ? ?</div>
+          <div class="tiers">${tierDots}</div>
+          <div class="ach-meta">${d.hint || 'Продолжай играть…'}</div>
+        </div>`;
+      }
+      const unclaimed = a.claimable ? ACH_REWARDS.slice(a.claimed, a.tier).reduce((s, x) => s + x, 0) : 0;
+      const excl = d.excl ? '<span class="ach-excl">эксклюзив</span>' : '';
+      return `<div class="ach ${a.tier >= 3 ? 'done' : ''}" data-ach="${d.id}">
+        ${excl}
+        <img src="./assets/ach/${d.icon}-t.png" alt="" loading="lazy">
+        <div class="ach-name">${d.name}</div>
+        <div class="tiers">${tierDots}</div>
+        ${a.next != null
+          ? `<div class="abar"><i style="width:${Math.floor(a.frac * 100)}%"></i></div>
+             <div class="ach-meta">${fmtVal(d, a.value)} / ${fmtVal(d, a.next)} · +${ACH_REWARDS[a.tier]}🦴</div>`
+          : `<div class="ach-meta gold-txt">${fmtVal(d, a.value)} · ЗОЛОТО</div>`}
+        ${unclaimed ? `<button class="ach-claim" data-claim="${d.id}">Забрать ${unclaimed}🦴</button>` : ''}
+      </div>`;
+    };
+    const total = list.length, goldDone = list.filter(a => a.tier >= 3).length;
+    const stars = list.reduce((s, a) => s + a.tier, 0);
+    return `<div class="ach-head-row">
+        <span class="ach-count">🏆 ${goldDone} / ${total} · ★${stars}/${total * 3}</span>
+      </div>
+      ${ACH_SECTIONS.map(sec => {
+        const items = list.filter(a => a.def.sec === sec.key);
+        if (!items.length) return '';
+        return `<div class="ach-sec">${sec.name}</div><div class="ach-grid">${items.map(card).join('')}</div>`;
+      }).join('')}`;
+  }
+
   showShop(onChange) {
     const el = document.getElementById('shop');
     if (!el) return;
@@ -309,8 +409,9 @@ export class UI {
         const owned = this.meta.ownsCosmetic(it.slot, it.id);
         const equipped = equip[it.slot] === it.id;
         const afford = bal >= it.price;
-        const cls = equipped ? 'equipped' : (!owned && !afford ? 'locked' : '');
-        const status = equipped ? '✓ надето' : owned ? 'надеть' : (afford ? `${it.price.toLocaleString('ru')} 🦴` : `${it.price.toLocaleString('ru')} 🦴`);
+        const cls = equipped ? 'equipped' : (!owned && (it.excl || !afford) ? 'locked' : '');
+        const status = equipped ? '✓ надето' : owned ? 'надеть'
+          : it.excl ? '🏆 за ачивку' : `${it.price.toLocaleString('ru')} 🦴`;
         const col = equipped ? '#7fe056' : owned ? '#9adcff' : (afford ? RARITY[it.rarity].color : '#8a6a6a');
         // Ярлык редкости (кроме обычных) — чтобы ярусы читались, а легендарки манили.
         const rar = it.rarity !== 'common'

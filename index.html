@@ -8,8 +8,8 @@
   // Bootstrap-версия: index.html грузится всегда свежим (network-first / без SW),
   // поэтому знает актуальную сборку. Если у игрока в кэше старьё — один раз чистим
   // все кэши, разрегистрируем старый SW и перезагружаемся. Разрывает «залипание» SW.
-  window.__BUILD = 'staging-v17-hud-mult';
-  window.__CACHE = 'agility-staging-v13'; // должно совпадать с VERSION в sw.js
+  window.__BUILD = 'staging-v18-retention';
+  window.__CACHE = 'agility-staging-v14'; // должно совпадать с VERSION в sw.js
   (function () {
     try {
       var qs = new URLSearchParams(location.search);
@@ -194,6 +194,48 @@
   .dmission span { color: #ffd587; font-weight: 700; white-space: nowrap; }
   .dmission.done { color: #7fe056; border-color: rgba(127,224,86,0.35); background: rgba(127,224,86,0.08); }
   .dmission.done span { color: #7fe056; }
+
+  /* --- Недельный стрик заходов (#24) --- */
+  .week-card { background: rgba(20,34,58,0.6); border: 1px solid rgba(255,213,135,0.35); border-radius: 14px; padding: 10px 10px 9px; margin-bottom: 10px; }
+  .week-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 7px; }
+  .week-title { font-size: 12.5px; font-weight: 800; color: #ffd587; }
+  .wfreeze { font-size: 10px; color: #9adcff; background: rgba(154,220,255,0.12); border: 1px solid rgba(154,220,255,0.3); border-radius: 8px; padding: 1px 7px; }
+  .wdays { display: flex; gap: 4px; }
+  .wday { flex: 1; text-align: center; min-width: 0; }
+  .wday .wc { aspect-ratio: 1; border-radius: 10px; background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.13); display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 9px; }
+  .wday .wrw { font-size: 10px; font-weight: 800; color: #9db4d4; }
+  .wday.got .wc { background: rgba(127,224,86,0.15); border-color: rgba(127,224,86,0.5); }
+  .wday.got .wrw { color: #7fe056; }
+  .wday.today .wc { background: rgba(255,213,135,0.15); border-color: #ffd587; box-shadow: 0 0 10px rgba(255,213,135,0.3); }
+  .wday.today .wrw { color: #ffd587; }
+  .wday .wdl { font-size: 8px; color: #8ba0bd; margin-top: 2px; }
+  .wday .wbig { font-size: 13px; }
+  .week-claim { margin-top: 8px; width: 100%; background: linear-gradient(180deg,#ffd587,#f0a030); color: #2a1c08; border: none; border-radius: 10px; font-size: 12px; font-weight: 800; padding: 7px 0; cursor: pointer; }
+  .week-done { margin-top: 8px; text-align: center; font-size: 11.5px; color: #7fe056; font-weight: 700; }
+
+  /* --- Ачивки (#25) --- */
+  .ach-head-row { display: flex; justify-content: flex-end; margin-bottom: 2px; }
+  .ach-count { font-size: 11.5px; color: #9adcff; font-weight: 700; }
+  .ach-sec { font-size: 11px; font-weight: 800; color: #9db4d4; text-transform: uppercase; letter-spacing: 0.5px; margin: 10px 2px 6px; }
+  .ach-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+  .ach { background: rgba(20,34,58,0.65); border: 1px solid rgba(255,255,255,0.14); border-radius: 12px; padding: 7px 5px 6px; text-align: center; position: relative; }
+  .ach img { width: 52px; height: 52px; object-fit: contain; }
+  .ach-name { font-size: 10px; font-weight: 700; margin-top: 1px; min-height: 22px; line-height: 1.15; color: #eaf4ff; }
+  .tiers { display: flex; justify-content: center; gap: 3px; margin: 2px 0; }
+  .atier { width: 11px; height: 11px; border-radius: 50%; background: rgba(255,255,255,0.13); }
+  .atier.bronze { background: linear-gradient(180deg,#d08a45,#8a5a2e); }
+  .atier.silver { background: linear-gradient(180deg,#cdd6e0,#8ea0b5); }
+  .atier.gold { background: linear-gradient(180deg,#ffd75a,#e09a20); box-shadow: 0 0 6px rgba(255,213,90,0.5); }
+  .abar { height: 4px; background: rgba(255,255,255,0.12); border-radius: 3px; overflow: hidden; margin: 2px 4px; }
+  .abar i { display: block; height: 100%; background: linear-gradient(90deg,#9adcff,#4a7fd9); border-radius: 3px; }
+  .ach-meta { font-size: 9px; color: #9db4d4; }
+  .ach-meta.gold-txt { color: #ffd75a; font-weight: 700; }
+  .ach-claim { margin-top: 3px; background: linear-gradient(180deg,#7fe056,#4aa32e); color: #0d1522; border: none; border-radius: 8px; font-size: 9.5px; font-weight: 800; padding: 3px 6px; width: 94%; cursor: pointer; animation: achpulse 1.4s ease-in-out infinite; }
+  @keyframes achpulse { 50% { transform: scale(1.05); box-shadow: 0 0 10px rgba(127,224,86,0.5); } }
+  .ach.done { border-color: rgba(255,213,90,0.6); background: rgba(58,44,20,0.4); }
+  .ach.hidden-ach img { filter: brightness(0.25) saturate(0); }
+  .ach.hidden-ach .ach-name { color: #8ba0bd; }
+  .ach-excl { position: absolute; top: -6px; right: -4px; background: #7a3fd9; color: #fff; font-size: 7.5px; font-weight: 800; padding: 2px 5px; border-radius: 7px; }
   .gift-row { margin: 6px 0; }
   .gift-btn {
     width: 100%; background: linear-gradient(180deg, #7fe056, #4aba6a); border: none;

@@ -156,6 +156,8 @@ export class Game {
       score: 0, distance: 0, cookies: 0, maxCombo: 0, perfects: 0, faults: 0,
       cleanObstacles: 0, cleanHurdles: 0, perfectWeaves: 0, tunnels: 0, tables: 0,
       powerups: 0, cleanStreakDist: 0, _streakStart: 0,
+      // Счётчики ачивок (накопятся в meta при завершении забега)
+      nearMiss: 0, flights: 0, judgeEscapes: 0, revives: 0, nightReached: 0,
     };
     // Аналитика чистоты по типам снарядов: сколько раз тип встречен и как пройден
     // (perfect/clean/fault/death) — чтобы видеть честный fail-rate и где игроки «стоят».
@@ -415,7 +417,10 @@ export class Game {
       if (k === 'shield') continue;
       if (this.powerups[k] > 0) this.powerups[k] -= dt;
     }
-    if (this.judgeT > 0) this.judgeT -= dt;
+    if (this.judgeT > 0) {
+      this.judgeT -= dt;
+      if (this.judgeT <= 0) this.runStats.judgeEscapes++; // убежал от судьи — ачивка «Хвост трубой»
+    }
 
     // Галоп
     const stride = this.dogModel.cfg.stride || 2.6;
@@ -557,6 +562,7 @@ export class Game {
     const z = this.world.currentZone;
     if (z && this._zoneSeen && !this._zoneSeen.has(z)) {
       this._zoneSeen.add(z);
+      if (z === 'night') this.runStats.nightReached = 1; // ачивка «Ночной бегун»
       track('zone_enter', { run_id: this._runId, zone: z, distance_m: dm });
     }
   }
@@ -1055,6 +1061,7 @@ export class Game {
             // Near-miss: разминулся впритык (в 0.3-0.7 м от края) — свист и бонус
             if (!e._nearMissed && !over && d.stumbleInvulnT <= 0 && ddx >= e.halfW + pad && ddx < e.halfW + pad + 0.55) {
               e._nearMissed = true;
+              this.runStats.nearMiss++;
               this.score += 30 * Math.max(1, this.combo) * (this.metaMult || 1);
               this.popups.custom('ЧУТЬ-ЧУТЬ! +30', 'clean', d.x < ex ? 38 : 62, 46);
               this.audio.noise({ dur: 0.18, vol: 0.12, freq: 2600, q: 3 });
@@ -1434,14 +1441,22 @@ export class Game {
     d.stumbleInvulnT = 1.3;
     d.stumbleAnimT = 0.7;
     d.stunT = 0.7;
-    this.judgeT = 11;
     this.rig.shake(0.09);
     this.audio.stumble();
-    this.audio.whistle();
     if (withFault) this._fault(null, reason || 'СПОТКНУЛСЯ!');
     this.fx.crash(new THREE.Vector3(d.x, 0.3, d.z));
-    this.judge.visible = true;
-    this.judge.position.set(d.x, 0, d.z + 6);
+    // «Плавный старт»: в стартовой зоне судья не выбегает (39% умирали до 500 м, судья —
+    // 74% смертей). Дальше — «мягкая» зона с таймером 14 с. Новичкам (<3 забегов) зоны
+    // длиннее. meta.runs НЕ влияет на RNG/трассу — детерминизм трассы по сиду сохранён.
+    const newbie = (this.meta.data.runs || 0) < 3;
+    const graceEnd = newbie ? 600 : 400;
+    const softEnd = newbie ? 1000 : 700;
+    if (this.distance >= graceEnd) {
+      this.judgeT = this.distance < softEnd ? 14 : 11;
+      this.audio.whistle();
+      this.judge.visible = true;
+      this.judge.position.set(d.x, 0, d.z + 6);
+    }
   }
 
   _death(e, disqualified = false) {
@@ -1475,6 +1490,7 @@ export class Game {
     // Судья свистит и отходит, собака встряхивается, впереди чисто
     this.judgeT = 0;
     this.judge.visible = false;
+    this.runStats.revives++;
     d.stumbleInvulnT = 2.5;
     d.stunT = 0.4;
     d.shakeT = 0; // встряхивание
@@ -1545,7 +1561,7 @@ export class Game {
     if (this.pendingReload) { setTimeout(() => this.pendingReload(), 1500); }
     rs.score = Math.floor(this.score);
     rs.distance = this.distance;
-    const completed = this.meta.finishRun(rs);
+    const completed = this.meta.finishRun(rs, this.obstacleStats);
     for (const m of completed) this.ui.missionComplete(m);
     // Онлайн-лидерборд: отправляем результат (если задано имя и счёт значимый)
     if (this.meta.data.playerName && rs.score > 0) {
@@ -1617,6 +1633,7 @@ export class Game {
     else if (t === 'rocket') {
       this.powerups.rocket = this.powerupMax.rocket;
       this.flyT = this.powerupMax.rocket;
+      this.runStats.flights++;
       this.dog.airborne = false;
       this.audio.boost();
       this.audio.bark();

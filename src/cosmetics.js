@@ -45,6 +45,8 @@ export const NECKS = {
   flame:    { name: 'Огненный',        rarity: 'epic',   price: 1400, color: 0xff6a1a, tip: 0xffd23d },
   galaxy:   { name: 'Галактика',       rarity: 'legendary', price: 2600, color: 0x5a3fb0, tip: 0x9adcff },
   champion: { name: 'Чемпионский',     rarity: 'legendary', price: 3200, color: 0xf0b429, tip: 0xffffff },
+  // Эксклюзив: не продаётся (price 0) — выдаётся за золото ачивки «Коллекционер»
+  rosette:  { name: 'Розетка чемпиона', rarity: 'legendary', price: 0, excl: true, color: 0xd94060, tip: 0xffd75a },
 };
 
 // Полный каталог для магазина: [{slot, id, name, rarity, price}]

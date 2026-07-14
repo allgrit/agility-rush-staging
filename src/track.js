@@ -80,6 +80,9 @@ export class Track {
     // Даёт «ещё один забег»: чанки плотнее, чаще связки снаряд→снаряд, больше вторичных помех.
     // Скорость НЕ трогаем (остаётся честный потолок 26 м/с) — растёт только плотность/связность.
     const hard = 1 - Math.exp(-Math.max(0, idx - 40) / 80); // 0..~1, ~0.5 к idx≈95 (~3.2 км)
+    // «Плавный старт»: в первых ~12 чанках (≈400 м) шанс летальных помех (тележка/забор)
+    // вдвое ниже — 39% игроков умирали до 500 м. Зависит только от idx → детерминизм по сиду.
+    const ease = idx < 12 ? 0.5 : 1;
     // Плотность: после потолка чанк сжимается до ~26% (нижний предел gap честный для реакции на 26 м/с).
     // advance — реальная длина чанка в метрах; ВСЕ pity-счётчики считают именно её, иначе после
     // сжатия пауэрапы/буквы спавнились бы чаще задуманного (подрыв дефицита).
@@ -130,7 +133,7 @@ export class Track {
         // Breadcrumbs: низкая дорожка косточек внутри тоннеля — «пригнись и держи полосу»
         for (let c = 0; c < 4; c++) this._add(buildCookie(mainLane, z - 13 - c * 1.4, 0.32));
         const other = (mainLane + rng.pick([1, 2])) % 3;
-        if (rng.chance(0.4 + diff * 0.4)) this._add(buildCart(other, z - 15));
+        if (rng.chance((0.4 + diff * 0.4) * ease)) this._add(buildCart(other, z - 15));
         this._cookieLine(mainLane, z - 22, 5);
       },
       weave: () => {
@@ -145,7 +148,7 @@ export class Track {
       aframe: () => {
         this._add(buildAFrame(mainLane, z - 12));
         this._cookieLine(mainLane, z - 20, 4);
-        if (rng.chance(0.5)) this._add(buildFence([(mainLane + 1) % 3], z - 12));
+        if (rng.chance(0.5 * ease)) this._add(buildFence([(mainLane + 1) % 3], z - 12));
       },
       dogwalk: () => {
         this._add(buildDogwalk(mainLane, z - 14));
@@ -159,7 +162,7 @@ export class Track {
       tire: () => {
         this._add(buildTire(mainLane, z - 10));
         this._cookieArc(mainLane, z - 10);
-        if (rng.chance(diff * 0.9)) this._add(buildCart((mainLane + 1) % 3, z - 10));
+        if (rng.chance(diff * 0.9 * ease)) this._add(buildCart((mainLane + 1) % 3, z - 10));
       },
       table: () => {
         this._add(buildTable(mainLane, z - 10));
@@ -170,7 +173,7 @@ export class Track {
         const safe = rng.int(0, 2);
         for (const l of lanes) {
           if (l === safe) continue;
-          if (rng.chance(0.75)) this._add(rng.chance(0.5) ? buildCart(l, z - 12) : buildFence([l], z - 12));
+          if (rng.chance(0.75 * ease)) this._add(rng.chance(0.5) ? buildCart(l, z - 12) : buildFence([l], z - 12));
         }
         if (rng.chance(0.6)) {
           this._add(buildHurdle(safe, z - 12));
@@ -197,7 +200,7 @@ export class Track {
         } else if (rng.chance(0.6)) {
           // Помеха на земле в соседней полосе — стимул подняться наверх
           const other = (mainLane + 1) % 3;
-          this._add(buildCart(other, z - 10 - len / 2));
+          if (rng.chance(ease)) this._add(buildCart(other, z - 10 - len / 2));
         }
         // Пауэрап на верхотуре — награда за высоту
         if (rng.chance(0.35)) {

@@ -1,6 +1,10 @@
 // Метапрогрессия: валюта, собаки, миссии, розетки-титулы, косметика. Персист в localStorage.
 
-import { priceOf, itemOf } from './cosmetics.js';
+import { priceOf, itemOf, NECKS } from './cosmetics.js';
+import { ACHIEVEMENTS, ACH_REWARDS, progressOf, statOf } from './achievements.js';
+
+// Награды недельного стрика заходов (день 1..7); день 7 — сундук (косточки + шанс косметики)
+export const WEEK_REWARDS = [50, 80, 120, 180, 250, 350, 500];
 
 const KEY = 'agility-rush-save-v1';
 
@@ -129,6 +133,9 @@ export class Meta {
       recordSubmitted: false,
       cosmeticsOwned: {}, // { 'coat:gold': 1, 'neck:red': 1 } — купленная косметика
       cosmeticsEquip: {}, // { coat: 'gold', neck: 'red' } — надетое сейчас
+      achCounters: {},    // накопительные счётчики ачивок (perf_hurdle, totalDist, …)
+      achClaimed: {},     // { achId: сколько ярусов забрано (0..3) }
+      week: { streak: 0, lastDay: null, claimedDay: null, freezeWeek: null }, // недельный стрик заходов
     };
   }
 
@@ -146,6 +153,10 @@ export class Meta {
     if (d.dailyMissions === undefined) d.dailyMissions = null;
     if (!d.cosmeticsOwned) d.cosmeticsOwned = {};
     if (!d.cosmeticsEquip) d.cosmeticsEquip = {};
+    // Ретеншн-пакет: счётчики ачивок, клеймы, недельный стрик
+    if (!d.achCounters) d.achCounters = {};
+    if (!d.achClaimed) d.achClaimed = {};
+    if (!d.week) d.week = { streak: 0, lastDay: null, claimedDay: null, freezeWeek: null };
     return d;
   }
 
@@ -155,8 +166,10 @@ export class Meta {
   buyCosmetic(slot, id) {
     if (!itemOf(slot, id) || this.ownsCosmetic(slot, id)) return false;
     const price = priceOf(slot, id);
+    if (price <= 0) return false; // эксклюзивы не продаются — только за ачивку
     if ((this.data.cookies || 0) < price) return false;
     this.data.cookies -= price;
+    this.data.achCounters.spent = (this.data.achCounters.spent || 0) + price; // ачивка «Щедрая лапа»
     this.data.cosmeticsOwned[`${slot}:${id}`] = 1;
     this.data.cosmeticsEquip[slot] = id; // купил — сразу надел
     this.save();
@@ -267,7 +280,7 @@ export class Meta {
     return completed;
   }
 
-  finishRun(runStats) {
+  finishRun(runStats, obstacleStats) {
     this.data.runs++;
     if (!this.data.missionBest) this.data.missionBest = {};
     for (const m of this.data.missions) {
@@ -278,10 +291,128 @@ export class Meta {
     this.data.totalScore += runStats.score;
     this.data.bestScore = Math.max(this.data.bestScore, runStats.score);
     this.data.bestDistance = Math.max(this.data.bestDistance, Math.floor(runStats.distance));
+    this._accrueAchievements(runStats, obstacleStats);
     const completed = this.checkMissions(runStats);
     this.data.liveRun = null; // забег закрыт штатно — снимаем страховку
     this.save();
     return [...completed, ...dailyDone];
+  }
+
+  // ---------- Ачивки: накопление и клеймы ----------
+  _accrueAchievements(rs, obstacleStats) {
+    const c = this.data.achCounters;
+    const add = (k, v) => { if (v) c[k] = (c[k] || 0) + v; };
+    const best = (k, v) => { if (v > (c[k] || 0)) c[k] = v; };
+    for (const [kind, s] of Object.entries(obstacleStats || {})) add('perf_' + kind, s.perfect | 0);
+    add('totalDist', Math.floor(rs.distance || 0));
+    add('nearMiss', rs.nearMiss | 0);
+    add('flights', rs.flights | 0);
+    add('judgeEscapes', rs.judgeEscapes | 0);
+    add('revives', rs.revives | 0);
+    add('nightRuns', rs.nightReached | 0);
+    best('bestRunDist', Math.floor(rs.distance || 0));
+    best('bestCombo', rs.maxCombo | 0);
+    best('bestCleanDist', Math.floor(rs.cleanStreakDist || 0));
+    // Дни игры: считаем уникальные дни по последнему сыгранному
+    const today = this._todayKey();
+    if (c.lastPlayDay !== today) { c.lastPlayDay = today; add('daysPlayed', 1); }
+  }
+
+  // Список ачивок с прогрессом и невыбранными наградами (для UI)
+  achievements() {
+    return ACHIEVEMENTS.map(def => {
+      const p = progressOf(this, def);
+      const claimed = this.data.achClaimed[def.id] || 0;
+      return { def, ...p, claimed, claimable: p.tier > claimed };
+    });
+  }
+
+  achClaimableCount() {
+    return this.achievements().filter(a => a.claimable).length;
+  }
+
+  // Забрать все достигнутые, но не выданные ярусы одной ачивки; вернёт сумму косточек
+  claimAchievement(id) {
+    const def = ACHIEVEMENTS.find(a => a.id === id);
+    if (!def) return 0;
+    const p = progressOf(this, def);
+    const claimed = this.data.achClaimed[id] || 0;
+    let total = 0;
+    for (let t = claimed; t < p.tier; t++) total += ACH_REWARDS[t];
+    if (!total) return 0;
+    this.data.achClaimed[id] = p.tier;
+    this.data.cookies += total;
+    // Эксклюзив за золото (вне магазина): выдаём предмет, если определён
+    if (p.tier === 3 && def.excl && !this.ownsCosmetic('neck', def.excl)) {
+      this.data.cosmeticsOwned['neck:' + def.excl] = 1;
+    }
+    this.save();
+    return total;
+  }
+
+  // ---------- Недельный стрик заходов ----------
+  _weekKey() { // ISO-неделя не нужна: округляем к понедельнику локально
+    const d = new Date();
+    const day = (d.getDay() + 6) % 7; // пн=0
+    const mon = new Date(d.getFullYear(), d.getMonth(), d.getDate() - day);
+    return mon.getFullYear() + '-' + (mon.getMonth() + 1) + '-' + mon.getDate();
+  }
+
+  // Состояние стрика на сегодня: продлеваем/замораживаем/сбрасываем по факту захода
+  weekState() {
+    const w = this.data.week;
+    const today = this._todayKey();
+    if (w.lastDay !== today) {
+      const yesterday = new Date(Date.now() - 86400000);
+      const yKey = yesterday.getFullYear() + '-' + (yesterday.getMonth() + 1) + '-' + yesterday.getDate();
+      if (w.lastDay === yKey) {
+        w.streak = (w.streak || 0) + 1; // пришёл на следующий день — серия растёт
+        w.frozen = false; // серия продолжена честно — значок заморозки снимаем
+      } else if (w.lastDay) {
+        // Пропуск. Одна «заморозка» в неделю спасает серию (не бесим игрока).
+        const wk = this._weekKey();
+        if (w.freezeWeek !== wk && w.streak > 0) { w.freezeWeek = wk; w.streak = (w.streak || 0) + 1; w.frozen = true; }
+        else { w.streak = 1; w.frozen = false; }
+      } else {
+        w.streak = 1; // первый заход вообще
+      }
+      w.lastDay = today;
+      // Лучший стрик — в счётчик ачивки «Огонёк»
+      const c = this.data.achCounters;
+      if ((w.streak || 0) > (c.bestStreak || 0)) c.bestStreak = w.streak;
+      this.save();
+    }
+    const dayIdx = Math.min(7, ((w.streak - 1) % 7) + 1); // 1..7 внутри недельного цикла
+    return {
+      streak: w.streak, dayIdx,
+      reward: WEEK_REWARDS[dayIdx - 1],
+      claimed: w.claimedDay === today,
+      freezeLeft: w.freezeWeek !== this._weekKey(),
+      frozen: !!w.frozen,
+    };
+  }
+
+  // Забрать награду дня; день 7 — сундук: косточки + шанс некупленной банданы
+  claimWeek() {
+    const st = this.weekState();
+    if (st.claimed) return null;
+    this.data.week.claimedDay = this._todayKey();
+    let amount = st.reward, bonusItem = null;
+    if (st.dayIdx === 7) {
+      // Сундук: 30% — случайная некупленная common/rare бандана, иначе +200 косточек
+      const candidates = Object.entries(NECKS)
+        .filter(([id, n]) => (n.rarity === 'common' || n.rarity === 'rare') && !this.ownsCosmetic('neck', id) && n.price > 0);
+      if (candidates.length && Math.random() < 0.3) {
+        const [id] = candidates[Math.floor(Math.random() * candidates.length)];
+        this.data.cosmeticsOwned['neck:' + id] = 1;
+        bonusItem = { slot: 'neck', id };
+      } else {
+        amount += 200;
+      }
+    }
+    this.data.cookies += amount;
+    this.save();
+    return { amount, bonusItem, dayIdx: st.dayIdx };
   }
 
   // ---------- Слово дня из костей-букв ----------
@@ -325,6 +456,7 @@ export class Meta {
       d.completeDate = d.date;
       reward = 100 * Math.min(5, d.streak);
       this.data.cookies += reward;
+      this.data.achCounters.words = (this.data.achCounters.words || 0) + 1; // ачивка «Словарный запас»
     }
     this.save();
     return { letter, done, reward, streak: d.streak };
@@ -375,6 +507,7 @@ export class Meta {
     const dog = DOG_SHOP.find(d => d.key === key);
     if (!dog || this.data.unlocked.includes(key) || this.data.cookies < dog.cost) return false;
     this.data.cookies -= dog.cost;
+    this.data.achCounters.spent = (this.data.achCounters.spent || 0) + dog.cost;
     this.data.unlocked.push(key);
     this.data.selectedDog = key;
     this.save();
