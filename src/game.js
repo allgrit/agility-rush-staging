@@ -90,6 +90,13 @@ export class Game {
     this.dogLight = new THREE.PointLight(0xfff0dd, 6, 5, 2);
     this.dogLight.position.set(0, 1.6, 0.4);
     scene.add(this.dogLight);
+    // Контактная тень-пятно: якорит собаку к земле (без неё на ярком газоне она «парит»)
+    this.dogBlob = new THREE.Mesh(
+      new THREE.CircleGeometry(0.52, 18),
+      new THREE.MeshBasicMaterial({ color: 0x08140a, transparent: true, opacity: 0.32, depthWrite: false })
+    );
+    this.dogBlob.rotation.x = -Math.PI / 2;
+    scene.add(this.dogBlob);
     this.inputQueue = [];
     // Тип управления — для вида подсказок обучения (не влияет на физику/детерминизм).
     // ?touch форсит жесты-лапы даже на десктопе (для проверки), ?tut держит обучение
@@ -539,6 +546,14 @@ export class Game {
     this.dogModel.update(dt, pose);
     this.dogModel.root.position.set(d.x, d.y + (pose.surfaceLift || 0), d.z);
     this.dogLight.position.set(d.x, d.y + 1.6, d.z + 0.4);
+    // Тень-пятно: на земле под собакой, сжимается и бледнеет в прыжке/полёте.
+    // flyT: airborne=false (физика фрисби не через гравитацию), но собака в воздухе —
+    // тень прижимаем к земле и гасим, иначе пятно висит на высоте полёта.
+    const inFlight = this.flyT > 0;
+    const airK = Math.max(0, Math.min(1, (d.airborne || inFlight) ? (d.y / 2.4) : 0));
+    this.dogBlob.position.set(d.x, 0.015 + ((d.airborne || inFlight) ? 0 : d.y), d.z + 0.1);
+    this.dogBlob.scale.setScalar(1 - airK * 0.45);
+    this.dogBlob.material.opacity = 0.32 * (1 - airK * 0.6);
     this.dogModel.root.rotation.y = 0;
     // Мигание в кадре неуязвимости — читаемый сигнал i-frames (детерминировано по таймеру).
     this.dogModel.root.visible = !(d.stumbleInvulnT > 0 && Math.floor(d.stumbleInvulnT * 12) % 2 === 0);
@@ -1315,10 +1330,10 @@ export class Game {
       this.runStats.perfects++;
       // Juice (#27, F6): hit-stop 40 мс — «мясо» лучшего момента игры (раньше был только
       // на смерти). Механизм hitstopT уже детерминирован (фриз тиков одинаков между прогонами).
-      this.hitstopT = Math.max(this.hitstopT, 0.04);
+      this.hitstopT = Math.max(this.hitstopT, 0.05);
       this.slowmoT = Math.max(this.slowmoT, 0.16);
       this.rig.punch(1);
-      this.audio.perfect();
+      this.audio.perfect(this.combo);
       this.world.cheer(d.z, 1); // трибуны ликуют (juice #27)
       this.popups.perfect();
       this.fx.perfectBurst(new THREE.Vector3(d.x, d.y + 0.6, d.z));

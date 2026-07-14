@@ -92,7 +92,9 @@ export class CameraRig {
 
     // Целевая позиция: позади и выше собаки; у тоннеля приседает, в полёте отъезжает
     let back = 3.7 - spd * 0.35;
-    let height = 1.85 + dog.y * 0.8;
+    // Композиция (feel-редизайн): камера выше — горизонт поднимается (~29% от верха),
+    // собака опускается в нижнюю треть (лапы ~74%), под ней больше «пола, летящего под ноги».
+    let height = 2.2 + dog.y * 0.8;
     back += this.crouch * -0.6 + this.flyK * 1.1 + this.elevK * 0.5;
     height += this.crouch * -0.75 + this.flyK * 0.7 + this.elevK * 0.35;
     height = Math.max(0.95, height);
@@ -117,7 +119,7 @@ export class CameraRig {
 
     // Шейк: события + микро-тряска на высокой скорости
     let sx = 0, sy = 0;
-    const speedShake = spd > 0.82 ? (spd - 0.82) * 0.05 : 0;
+    const speedShake = spd > 0.7 ? (spd - 0.7) * 0.075 : 0; // тряска раньше и сильнее — «на пределе»
     const amp = Math.max(this.shakeAmp, speedShake);
     if (amp > 0.001) {
       sx = (Math.sin(this.shakeT * 1.3) + Math.sin(this.shakeT * 2.7)) * 0.5 * amp;
@@ -141,10 +143,13 @@ export class CameraRig {
     this.roll += (this.rollTarget - this.roll) * Math.min(1, 8 * dt);
     this.camera.rotation.z += this.roll;
 
-    // FOV: скорость + панч + полёт
+    // FOV: скорость (квадратично 62→76: рывок «врывается» к концу разгона) + панч + полёт.
+    // Асимметричный lerp: вверх быстро (kick), вниз плавно — прежние +9° линейно были ниже
+    // порога восприятия.
     if (this.zoomPunch > 0.001) this.zoomPunch *= Math.pow(0.01, dt);
-    const targetFov = this.baseFov + spd * 9 - this.zoomPunch * 6 + this.flyK * 7;
-    this.camera.fov += (targetFov - this.camera.fov) * Math.min(1, 6 * dt);
+    const targetFov = this.baseFov + spd * spd * 14 - this.zoomPunch * 6 + this.flyK * 7;
+    const fovRate = targetFov > this.camera.fov ? 10 : 3;
+    this.camera.fov += (targetFov - this.camera.fov) * Math.min(1, fovRate * dt);
     this.camera.updateProjectionMatrix();
   }
 

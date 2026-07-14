@@ -118,7 +118,9 @@ export class World {
     this.rim.position.set(2, 5, 9);
     this.scene.add(this.rim);
     this.scene.add(this.rim.target);
-    this.scene.fog = new THREE.Fog(0xcfe8f2, 68, 195);
+    // Aerial perspective (feel-редизайн): туман ближе — даль «тонет», ближний план
+    // контрастнее. Спавн снарядов на ~170 м: из дымки выходят за ~6 с — читаемость ок.
+    this.scene.fog = new THREE.Fog(0xcfe8f2, 54, 178);
   }
 
   _buildGround() {
@@ -179,6 +181,24 @@ export class World {
         line.receiveShadow = true;
         seg.add(line);
       }
+      // Поперечный ритм покрытия (feel-редизайн): тёмные стыки-полосы через всю трассу
+      // каждые 3 м. Продольные полосы стрижки параллельны движению и дают НОЛЬ оптического
+      // потока; поперечные — «мелькание земли под ногами» (частота 26/3 ≈ 8.7 Гц — читается
+      // как движение, не стробит). Прозрачный тёмный слой работает во всех зонах суток.
+      {
+        const crossN = Math.ceil(SEG / 3);
+        const crossInst = new THREE.InstancedMesh(
+          new THREE.BoxGeometry(TRACK_HALF * 2, 0.012, 0.34),
+          new THREE.MeshBasicMaterial({ color: 0x0c1a08, transparent: true, opacity: 0.34 }),
+          crossN
+        );
+        for (let d = 0; d < crossN; d++) {
+          M.makeTranslation(0, 0.013, -SEG / 2 + d * 3 + 1.5);
+          crossInst.setMatrixAt(d, M);
+        }
+        crossInst.instanceMatrix.needsUpdate = true; crossInst.computeBoundingSphere();
+        seg.add(crossInst);
+      }
       // Пунктир центров полос — один InstancedMesh (был ~30 отдельных мешей)
       {
         const dashInst = new THREE.InstancedMesh(new THREE.BoxGeometry(0.05, 0.015, 1.2), lineMat, LANE_X.length * Math.ceil(SEG / 3));
@@ -193,14 +213,16 @@ export class World {
       // Бордюры: красно-белые сегменты по кромке — 2 InstancedMesh (по цвету, через material.color —
       // точный путь оригинала; instanceColor давал чуть иной цвет из-за color-management). Был ~40 мешей.
       {
-        const curbGeo = new THREE.BoxGeometry(0.28, 0.11, 1.5);
-        const N = 2 * Math.ceil(SEG / 1.5);
+        // Период 3 м (было 1.5): на 26 м/с 1.5-метровый шаг мерцал на 17 Гц — выше частоты
+        // слежения глаза, читался как шум. 3 м = 8.7 Гц — снова «движение».
+        const curbGeo = new THREE.BoxGeometry(0.28, 0.11, 3.0);
+        const N = 2 * Math.ceil(SEG / 3.0);
         const mkCurb = (hex) => { const m = new THREE.InstancedMesh(curbGeo, new THREE.MeshStandardMaterial({ color: hex, roughness: 0.9, flatShading: true }), N); m.castShadow = true; m.receiveShadow = true; return m; };
         const curbRed = mkCurb(0xd8434e), curbWhite = mkCurb(0xf5f0e6);
         let ri = 0, wi = 0;
-        for (const sd of [-1, 1]) for (let d = 0; d < SEG; d += 1.5) {
-          M.makeTranslation(sd * (TRACK_HALF + 0.14), 0.005, -SEG / 2 + d + 0.75);
-          if ((d / 1.5) % 2 < 1) curbRed.setMatrixAt(ri++, M); else curbWhite.setMatrixAt(wi++, M);
+        for (const sd of [-1, 1]) for (let d = 0; d < SEG; d += 3.0) {
+          M.makeTranslation(sd * (TRACK_HALF + 0.14), 0.005, -SEG / 2 + d + 1.5);
+          if ((d / 3.0) % 2 < 1) curbRed.setMatrixAt(ri++, M); else curbWhite.setMatrixAt(wi++, M);
         }
         curbRed.count = ri; curbWhite.count = wi;
         curbRed.instanceMatrix.needsUpdate = true; curbRed.computeBoundingSphere();
@@ -427,12 +449,12 @@ export class World {
       flagGeo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
       flagGeo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
     }
-    const FLAGS = 36, POSTS = 12;
+    const FLAGS = 40, POSTS = 14;
     this.sideFlags = new THREE.InstancedMesh(flagGeo,
       new THREE.MeshLambertMaterial({ color: 0xd8434e, flatShading: true }), FLAGS);
-    // Судейская стойка: столбик с «табличкой»
-    const postGeo = new THREE.BoxGeometry(0.4, 0.9, 0.12);
-    postGeo.translate(0, 0.45, 0);
+    // Высокий столб-мачта: проносится мимо камеры через верх кадра (главный speed-cue)
+    const postGeo = new THREE.BoxGeometry(0.16, 4.6, 0.16);
+    postGeo.translate(0, 2.3, 0);
     this.sidePosts = new THREE.InstancedMesh(postGeo,
       new THREE.MeshLambertMaterial({ color: 0xf0ead8, flatShading: true }), POSTS);
     this.sideFlags.frustumCulled = false; // короткая лента вдоль трассы, куллинг не окупается
@@ -451,7 +473,7 @@ export class World {
   }
 
   _updateSideProps(dogZ, dist) {
-    const FLAG_STEP = 11, POST_STEP = 42;
+    const FLAG_STEP = 8, POST_STEP = 9;
     const write = (mesh, count, step, xBase, yScaleVar) => {
       const firstSlot = Math.floor(dist / step) - 1;
       for (let i = 0; i < count; i++) {
@@ -461,7 +483,7 @@ export class World {
         const x = side * (xBase + h * 2.2);
         // Мировая z из дистанции слота: rebase-безопасно (dogZ и dist двигаются синхронно)
         const z = dogZ - (slot * step - dist);
-        const sc = 0.85 + yScaleVar * h;
+        const sc = 1.2 + yScaleVar * h;
         this._propMtx.makeRotationY(h * 6.28);
         this._propScaleV.set(1, sc, 1);
         this._propMtx.scale(this._propScaleV);
@@ -470,8 +492,8 @@ export class World {
       }
       mesh.instanceMatrix.needsUpdate = true;
     };
-    write(this.sideFlags, 36, FLAG_STEP, TRACK_HALF + 2.4, 0.5);
-    write(this.sidePosts, 12, POST_STEP, TRACK_HALF + 3.6, 0.25);
+    write(this.sideFlags, 40, FLAG_STEP, TRACK_HALF + 2.4, 0.5);
+    write(this.sidePosts, 14, POST_STEP, TRACK_HALF + 0.55, 0.18);
   }
 
   _bannerTexture() {
@@ -636,7 +658,7 @@ export class World {
     for (let i = 0; i < 6; i++) {
       for (const s of [-1, 1]) {
         const marker = new THREE.Object3D();
-        marker.position.set(s * (TRACK_HALF + 4.4), 0, -i * 44 + 14);
+        marker.position.set(s * (TRACK_HALF + 4.4), 0, -i * 28 + 14); // шаг 28 (было 44): дыры 22 м убивали непрерывность боковин
         marker.userData.z0 = marker.position.z;
         marker.userData.side = s;
         marker.userData.index = this.stands.length;
@@ -685,7 +707,7 @@ export class World {
     this.banners = [];
     for (let i = 0; i < 3; i++) {
       const marker = new THREE.Object3D();
-      marker.position.z = -60 - i * 120;
+      marker.position.z = -60 - i * 60; // период 60 м: overhead-структура каждые ~2.3 с на максималке
       marker.userData.z0 = marker.position.z;
       marker.userData.index = i;
       this.banners.push(marker);
@@ -881,7 +903,12 @@ export class World {
     this.rim.intensity = za.rim + (zb.rim - za.rim) * t;
     this.cloudMat.opacity = za.cloudOp + (zb.cloudOp - za.cloudOp) * t;
     li(this.cloudMat.color, za.cloud, zb.cloud);
-    if (this.hillMat) li(this.hillMat.color, za.hill, zb.hill);
+    if (this.hillMat) {
+      // Дальние холмы дополнительно уводим к тону тумана — плоский задник обретает глубину
+      li(this.hillMat.color, za.hill, zb.hill);
+      _zc0.set(za.fog).lerp(_zc2.set(zb.fog), t);
+      this.hillMat.color.lerp(_zc0, 0.3);
+    }
     if (this.ridgeMat) {
       // Хребет чуть светлее тумана — читается как дальний план
       _zc0.set(za.fog).lerp(_zc2.set(zb.fog), t); // fogC
@@ -928,7 +955,7 @@ export class World {
     for (let i = 0; i < this.stands.length; i++) {
       const marker = this.stands[i];
       if (marker.position.z > dogZ + 30) {
-        marker.position.z -= 44 * 6;
+        marker.position.z -= 28 * 6;
         this._writeStandStaticMatrices(i);
         standRecycled = true;
       }
@@ -947,7 +974,7 @@ export class World {
     for (let i = 0; i < this.banners.length; i++) {
       const marker = this.banners[i];
       if (marker.position.z > dogZ + 20) {
-        marker.position.z -= 120 * 3;
+        marker.position.z -= 60 * 3; // цикл = 3 маркера × период 60 м
         this._writeBannerMatrices(i);
         bannerRecycled = true;
       }

@@ -3,7 +3,7 @@
 // по мере запроса). Новая версия НЕ применяется на лету — старые вкладки доигрывают
 // на своём коде, обновление активируется контролируемо по клику игрока (skipWaiting).
 
-const VERSION = 'agility-staging-v21';
+const VERSION = 'agility-staging-v22';
 const CORE = [
   './',
   './index.html',

@@ -322,6 +322,50 @@ window.__harness = {
     renderFrame();
     return game.state;
   },
+  // Концепт расходника «Тягач-игрушка» (только визуал, харнесс-прототип #30): фрисби на «поводке»
+  // от пасти. phase: 'pull' — летит впереди и тянет; 'mouth' — поймана, в зубах. Ничего в игровой
+  // ветке не трогает — чистая презентация для показа концепта.
+  tugConcept(phase = 'pull', breed = 'border') {
+    this.boot(42, breed);
+    const dm = game.dogModel;
+    const anchor = (dm && dm.parts && dm.parts.head) ? dm.parts.head : dm.root;
+    if (this._tug) { this._tug.parent && this._tug.parent.remove(this._tug); this._tug = null; }
+    const g = new THREE.Group();
+    const nose = new THREE.Vector3(0, -0.015, -0.195); // локаль головы
+    const toyPos = phase === 'mouth' ? new THREE.Vector3(0, -0.035, -0.265)
+                                     : new THREE.Vector3(0, 0.19, -0.7);
+    // фрисби-диск (сочный, с эмиссией под bloom)
+    const disc = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.145, 0.145, 0.032, 18),
+      new THREE.MeshStandardMaterial({ color: 0xff7a2f, roughness: 0.4, metalness: 0, flatShading: true, emissive: 0x5a1e00 }));
+    disc.rotation.x = phase === 'mouth' ? 1.5 : -0.9; // в зубах — ребром, в полёте — почти ребром вперёд (тянет)
+    disc.position.copy(toyPos);
+    g.add(disc);
+    // ободок диска
+    const rim = new THREE.Mesh(
+      new THREE.TorusGeometry(0.135, 0.022, 8, 20),
+      new THREE.MeshStandardMaterial({ color: 0xffd23f, roughness: 0.35, flatShading: true, emissive: 0x3a2800 }));
+    rim.rotation.x = disc.rotation.x + Math.PI / 2;
+    rim.position.copy(toyPos);
+    g.add(rim);
+    // поводок от носа к игрушке — только в фазе «тянет»
+    if (phase !== 'mouth') {
+      const dir = new THREE.Vector3().subVectors(toyPos, nose);
+      const len = dir.length();
+      const rope = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.011, 0.011, len, 6),
+        new THREE.MeshStandardMaterial({ color: 0xe23b3b, roughness: 0.7, flatShading: true }));
+      rope.position.copy(nose).add(toyPos).multiplyScalar(0.5);
+      rope.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
+      g.add(rope);
+    }
+    anchor.add(g);
+    this._tug = g;
+    game.update(); game.update(); // пара кадров для живой позы галопа
+    applyCloseup();
+    renderFrame();
+    return this.state();
+  },
   // Прогнать n кадров; actions: { frameIndex: 'left'|'right'|'up'|'down' }
   step(n = 1, actions = {}) {
     for (let i = 0; i < n; i++) {

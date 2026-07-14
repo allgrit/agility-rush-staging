@@ -132,10 +132,12 @@ export class Audio {
   laneSwitch() { this.noise({ dur: 0.06, vol: 0.06, freq: 1200 }); }
   barKnock() { this.tone({ freq: 220, type: 'square', dur: 0.3, vol: 0.25, slide: -80 }); this.noise({ dur: 0.2, vol: 0.2, freq: 400 }); }
   clean() { this.tone({ freq: 660, type: 'sine', dur: 0.12, vol: 0.22 }); this.tone({ freq: 880, type: 'sine', dur: 0.15, vol: 0.22, delay: 0.07 }); }
-  perfect() {
-    this.tone({ freq: 660, dur: 0.1, vol: 0.25 });
-    this.tone({ freq: 880, dur: 0.1, vol: 0.25, delay: 0.07 });
-    this.tone({ freq: 1320, dur: 0.22, vol: 0.25, delay: 0.14 });
+  perfect(combo = 1) {
+    // Питч растёт с комбо (кап +5 ступеней): серия perfect звучит как восходящая лесенка
+    const k = Math.pow(1.06, Math.min(10, combo));
+    this.tone({ freq: 660 * k, dur: 0.1, vol: 0.26 });
+    this.tone({ freq: 880 * k, dur: 0.1, vol: 0.26, delay: 0.07 });
+    this.tone({ freq: 1320 * k, dur: 0.22, vol: 0.26, delay: 0.14 });
     this.crowdExcite(0.14);
   }
   weaveDing(i) { this.tone({ freq: 700 + i * 90, type: 'triangle', dur: 0.09, vol: 0.22 }); }

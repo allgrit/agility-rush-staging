@@ -766,8 +766,9 @@ export class UI {
     // Виньетка/спидлайны — диффим
     const dOp = state.danger ? 0.5 : 0;
     if (dOp !== h.danger) { h.danger = dOp; this.vignette.style.opacity = dOp; }
-    // Speed-lines: буст — ярко; высокая скорость — плавно по мере разгона (juice #27)
-    const sOp = state.boost ? 0.7 : Math.round((state.speedNorm || 0) * 45) / 100;
+    // Спидлайны только на бусте: статичный градиент не кодирует скорость (feel-ревью);
+    // ощущение скорости дают near-field объекты и поперечный ритм пола.
+    const sOp = state.boost ? 0.6 : 0;
     if (sOp !== h.boost) { h.boost = sOp; this.speedlines.style.opacity = sOp; }
   }
 
@@ -801,9 +802,15 @@ export class UI {
   }
 
   flash(color = 'rgba(255,255,255,0.5)') {
+    // Вход 30 мс / уход 180 мс. Раньше единый transition 0.25s не успевал разогнать
+    // opacity за 60 мс до снятия — «вспышка» достигала ~12% яркости и не существовала.
+    this.flashEl.style.transition = 'opacity 0.03s';
     this.flashEl.style.background = color;
     this.flashEl.style.opacity = 1;
-    setTimeout(() => { this.flashEl.style.opacity = 0; }, 60);
+    setTimeout(() => {
+      this.flashEl.style.transition = 'opacity 0.18s';
+      this.flashEl.style.opacity = 0;
+    }, 70);
   }
 
   missionComplete(def) {
