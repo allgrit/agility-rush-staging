@@ -59,7 +59,7 @@ export class UI {
     this.menuEl.innerHTML = `
       <div class="menu-card">
         <div class="hero tappable" id="hero-play">
-          <img src="./assets/hero.png" alt="">
+          <img src="./assets/hero.webp" alt="">
           <div class="hero-title"><h1>AGILITY<span> RUSH</span></h1>
           <div class="subtitle">Бесконечный чемпионат по аджилити</div></div>
           <div class="tap-hint">👆 Коснись — бежать</div>
@@ -385,6 +385,23 @@ export class UI {
 
   _esc(s) { return String(s).replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c])); }
 
+  // Мини-лоадер «собака выходит на старт» — пока догружается rigged-GLB (обычно <1 с)
+  showDogLoading() {
+    let el = document.getElementById('dog-loading');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'dog-loading';
+      el.innerHTML = '<div class="dogload-card"><span class="dogload-paw">🐕</span> Собака выходит на старт…</div>';
+      document.body.appendChild(el);
+    }
+    el.style.display = 'flex';
+  }
+
+  hideDogLoading() {
+    const el = document.getElementById('dog-loading');
+    if (el) el.style.display = 'none';
+  }
+
   // Разовый диалог о старте Сезона 2: объясняет пустой рейтинг, Зал славы и компенсацию —
   // гасит негатив «куда делся мой топ». Показывается один раз (флаг seenSeason2).
   showSeasonDialog() {
@@ -440,7 +457,7 @@ export class UI {
         `<span class="atier ${t < a.tier ? (t === 2 ? 'gold' : t === 1 ? 'silver' : 'bronze') : ''}"></span>`).join('');
       if (!revealed) {
         return `<div class="ach hidden-ach">
-          <img src="./assets/ach/${d.icon}-t.png" alt="" loading="lazy">
+          <img src="./assets/ach/${d.icon}-t.webp" alt="" loading="lazy">
           <div class="ach-name">? ? ?</div>
           <div class="tiers">${tierDots}</div>
           <div class="ach-meta">${d.hint || 'Продолжай играть…'}</div>
@@ -450,7 +467,7 @@ export class UI {
       const excl = d.excl ? '<span class="ach-excl">эксклюзив</span>' : '';
       return `<div class="ach ${a.tier >= 3 ? 'done' : ''}" data-ach="${d.id}">
         ${excl}
-        <img src="./assets/ach/${d.icon}-t.png" alt="" loading="lazy">
+        <img src="./assets/ach/${d.icon}-t.webp" alt="" loading="lazy">
         <div class="ach-name">${d.name}</div>
         <div class="tiers">${tierDots}</div>
         ${a.next != null

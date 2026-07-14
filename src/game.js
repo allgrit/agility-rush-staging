@@ -78,6 +78,10 @@ export class Game {
     this.track = new Track(scene, this.rng);
     this.fx = new Fx(scene);
     this.dogFactory = options.dogFactory || null;
+    // Промис rigged-фабрики (GLB грузится асинхронно, не блокируя старт страницы).
+    // Инвариант: процедурный бордер НЕ показывается на rigged-хостах никогда —
+    // пока GLB не доехал, собака скрыта, а старт забега ждёт фабрику (см. startRun).
+    this.dogFactoryPromise = options.dogFactoryPromise || null;
     this.dogModel = null;
     this.judge = buildJudge();
     this.judge.visible = false;
@@ -118,6 +122,11 @@ export class Game {
     this.dogModel = this.dogFactory && breed === 'border'
       ? this.dogFactory(breed, equip)
       : new Dog(breed, equip);
+    // Rigged ещё в пути: бордера прячем (пустая трасса на секунду лучше «не той» собаки).
+    // Как только фабрика доедет, main.js вызовет _setDog повторно — появится rigged.
+    if (breed === 'border' && !this.dogFactory && this.dogFactoryPromise) {
+      this.dogModel.root.visible = false;
+    }
     this.scene.add(this.dogModel.root);
     this.breed = breed;
   }
@@ -236,6 +245,16 @@ export class Game {
   }
 
   async startRun(seed = null, instant = false) {
+    // Rigged-бордер ещё грузится (GLB асинхронный): ждём фабрику с мини-лоадером.
+    // Процедурного бордера игрок не видит никогда; обычно ожидание < секунды.
+    if (this.breed === 'border' && !this.dogFactory && this.dogFactoryPromise) {
+      this.ui.showDogLoading();
+      const f = await this.dogFactoryPromise;
+      this.ui.hideDogLoading();
+      if (f) { this.dogFactory = f; }
+      this._setDog(this.meta.data.selectedDog); // rigged (или процедурная, если GLB не смогли)
+      this.dogFactoryPromise = null; // повторно не ждём: фабрика есть либо fallback принят
+    }
     this.audio.init();
     this.audio.resume();
     this._clearRun();

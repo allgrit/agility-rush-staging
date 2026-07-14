@@ -63,16 +63,23 @@ window.__diag = { glLostCount: 0, webgl: (() => {
 // На localhost он по-прежнему включается явным флагом; неизвестные hosts используют fallback.
 const wantsRiggedDog = shouldUseRiggedDog(location, params);
 
-let dogFactory = null;
+// Rigged GLB грузится АСИНХРОННО: раньше top-level await блокировал старт всей игры
+// на ~600КБ скачивания («очень долго грузится»). Теперь игра стартует сразу с
+// процедурной собакой, а rigged подменяется как только доедет (в меню/после смерти —
+// не посреди забега, чтобы не дёргать визуал).
+let dogFactoryPromise = null;
 if (wantsRiggedDog) {
-  try {
-    const { loadRiggedDogFactory } = await import('./rigged_dog.js');
-    dogFactory = await loadRiggedDogFactory('./assets/models/border-collie-test.glb');
-  } catch (error) {
-    window.__diag.riggedDogError = String(error?.message || error);
-  }
+  dogFactoryPromise = import('./rigged_dog.js')
+    .then(({ loadRiggedDogFactory }) => loadRiggedDogFactory('./assets/models/border-collie-test.glb'))
+    .then((f) => { window.__diag.riggedDogEnabled = true; return f; })
+    .catch((error) => {
+      window.__diag.riggedDogError = String(error?.message || error);
+      window.__diag.riggedDogEnabled = false;
+      return null;
+    });
+} else {
+  window.__diag.riggedDogEnabled = false;
 }
-window.__diag.riggedDogEnabled = !!dogFactory;
 
 // Баннер «графика перезапустилась» — вместо тихого чёрного экрана даём игроку выход.
 function showGlLostBanner() {
@@ -108,7 +115,19 @@ canvas.addEventListener('webglcontextrestored', () => {
   if (!HARNESS) import('./analytics.js').then(({ track }) => track('webgl_context_restored', { count: window.__diag.glLostCount })).catch(() => {});
 }, false);
 
-const game = new Game(renderer, scene, camera, { dogFactory });
+const game = new Game(renderer, scene, camera, { dogFactory: null, dogFactoryPromise });
+
+// GLB доехал: подключаем rigged-фабрику и пересоздаём собаку (до этого бордер СКРЫТ —
+// процедурная модель на прод-хостах не показывается никогда, см. _setDog).
+if (dogFactoryPromise) {
+  dogFactoryPromise.then((f) => {
+    if (!f) return;
+    game.dogFactory = f;
+    if (game.state !== 'running' && game.state !== 'paused' && game.state !== 'revive') {
+      try { game._setDog(game.meta.data.selectedDog); } catch { /* не критично — подменится при следующем _setDog */ }
+    }
+  });
+}
 
 // Аналитика: загрузка игры (device, время до готовности)
 if (!new URLSearchParams(location.search).has('harness')) {
