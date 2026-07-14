@@ -8,8 +8,8 @@
   // Bootstrap-версия: index.html грузится всегда свежим (network-first / без SW),
   // поэтому знает актуальную сборку. Если у игрока в кэше старьё — один раз чистим
   // все кэши, разрегистрируем старый SW и перезагружаемся. Разрывает «залипание» SW.
-  window.__BUILD = 'staging-v21-stable-tabs';
-  window.__CACHE = 'agility-staging-v17'; // должно совпадать с VERSION в sw.js
+  window.__BUILD = 'staging-v22-seasons';
+  window.__CACHE = 'agility-staging-v18'; // должно совпадать с VERSION в sw.js
   (function () {
     try {
       var qs = new URLSearchParams(location.search);
@@ -236,6 +236,28 @@
   .ach.hidden-ach img { filter: brightness(0.25) saturate(0); }
   .ach.hidden-ach .ach-name { color: #8ba0bd; }
   .ach-excl { position: absolute; top: -6px; right: -4px; background: #7a3fd9; color: #fff; font-size: 7.5px; font-weight: 800; padding: 2px 5px; border-radius: 7px; }
+
+  /* --- Сезоны лидерборда (#26) --- */
+  .season-banner {
+    background: rgba(255,213,135,0.1); border: 1px solid rgba(255,213,135,0.4); color: #ffd587;
+    border-radius: 12px; padding: 8px 12px; font-size: 11.5px; margin-bottom: 8px; text-align: center;
+  }
+  .lb-seasons { margin-bottom: 6px; }
+  .lb-hall-note { color: #9db4d4; font-size: 11px; text-align: center; margin: 4px 0 8px; }
+  #season-dialog {
+    position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center;
+    background: rgba(8,12,24,0.75); pointer-events: auto;
+  }
+  .season-card {
+    width: min(360px, 90vw); background: rgba(14,22,38,0.98);
+    border: 2px solid rgba(255,213,135,0.5); border-radius: 20px; padding: 20px 22px;
+    text-align: center; box-shadow: 0 20px 70px rgba(0,0,0,0.6);
+  }
+  .season-head { color: #ffd587; font-size: 20px; font-weight: 900; margin-bottom: 10px; }
+  .season-body p { color: #c8d8ee; font-size: 12.5px; line-height: 1.45; margin: 0 0 8px; }
+  .season-body b { color: #eaf4ff; }
+  .season-comp { color: #7fe056 !important; font-weight: 700; }
+  #season-dialog .menu-btn { margin-top: 6px; width: 100%; }
   .gift-row { margin: 6px 0; }
   .gift-btn {
     width: 100%; background: linear-gradient(180deg, #7fe056, #4aba6a); border: none;

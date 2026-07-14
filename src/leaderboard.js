@@ -15,29 +15,35 @@ async function hmac(msg) {
   return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+// Счёт v2 (Сезон 2): подпись включает версию шкалы — сервер валидирует и кладёт в активный сезон
+const SCORE_V = 2;
+
 export async function submitScore(name, score, distance) {
   try {
     const nm = String(name || 'Аноним').slice(0, 24);
     const sc = Math.floor(score);
     const ts = Date.now();
-    const sig = await hmac(`${GAME}|${nm}|${sc}|${ts}`); // подпись строго game|name|score|ts
+    const sig = await hmac(`${GAME}|${nm}|${sc}|${ts}|${SCORE_V}`); // v2: game|name|score|ts|sv
     const res = await fetch(`${API}/scores`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ game: GAME, name: nm, score: sc, distance: Math.floor(distance || 0), ts, sig }),
+      body: JSON.stringify({ game: GAME, name: nm, score: sc, distance: Math.floor(distance || 0), ts, sv: SCORE_V, sig }),
     });
     lbStatus.lastSubmit = { ok: res.ok, status: res.status, at: ts };
     if (!res.ok) return null;
-    return await res.json(); // { ok, rank }
+    return await res.json(); // { ok, rank, season }
   } catch (e) { lbStatus.lastSubmit = { ok: false, err: String(e).slice(0, 100), at: Date.now() }; return null; }
 }
 
-export async function fetchTop(period = 'all', limit = 10) {
+// season: null — активный сезон сервера; 1 — Зал славы. meta=true вернёт весь ответ
+// (activeSeason/season2Start — для баннера «завтра старт Сезона 2»).
+export async function fetchTop(period = 'all', limit = 10, season = null, meta = false) {
   try {
-    const res = await fetch(`${API}/top?game=${GAME}&period=${period}&limit=${limit}`, { cache: 'no-store' });
+    const s = season ? `&season=${season}` : '';
+    const res = await fetch(`${API}/top?game=${GAME}&period=${period}&limit=${limit}${s}`, { cache: 'no-store' });
     lbStatus.lastTop = { ok: res.ok, status: res.status, at: Date.now() };
     if (!res.ok) return null;
     const d = await res.json();
-    return d.top || [];
+    return meta ? d : (d.top || []);
   } catch (e) { lbStatus.lastTop = { ok: false, err: String(e).slice(0, 100), at: Date.now() }; return null; }
 }

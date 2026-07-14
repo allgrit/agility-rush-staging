@@ -70,8 +70,8 @@ export class UI {
             <div class="title-name">${title.current.name} <span class="title-lvl">Ур. ${lvl}</span></div>
             <div class="title-bar"><i style="width:${Math.floor(title.progress * 100)}%"></i></div>
             ${title.next
-              ? `<div class="title-next">🏆 ${d.totalScore.toLocaleString('ru')} / ${title.next.need.toLocaleString('ru')} · до «${title.next.gen}» ещё ${(title.next.need - d.totalScore).toLocaleString('ru')}</div>`
-              : `<div class="title-next">🏆 ${d.totalScore.toLocaleString('ru')} · максимальный уровень!</div>`}
+              ? `<div class="title-next">🏆 рекорд ${d.bestScore.toLocaleString('ru')} / ${title.next.need.toLocaleString('ru')} · до «${title.next.gen}» ещё ${(title.next.need - d.bestScore).toLocaleString('ru')}</div>`
+              : `<div class="title-next">🏆 рекорд ${d.bestScore.toLocaleString('ru')} · максимальный уровень!</div>`}
           </div>
         </div>
         ${rec ? `<div class="recovered-row">💾 Прерванный забег не пропал: <b>+${rec.cookies}🦴</b> и ${rec.distance} м зачтены в прогресс</div>` : ''}
@@ -140,6 +140,7 @@ export class UI {
         <div class="meta-panel" data-panel="ach">${this._achPanelHtml()}</div>
         <!-- Панель «Топ»: онлайн-лидерборд + ник + соперники -->
         <div class="meta-panel" data-panel="top">
+          <div id="season-banner" class="season-banner" style="display:none"></div>
           <div class="rivals" id="rivals">
             <div class="rivals-head"><button class="lb-open" id="lb-open">🏅 Онлайн-топ ›</button> <button class="name-btn ${!d.playerName && d.bestScore > 0 ? 'call' : ''}" id="name-btn">${d.playerName ? '✎ ' + d.playerName : (d.bestScore > 0 ? '🏆 в топ!' : '＋ имя')}</button></div>
             <div id="rivals-list">${this._rivalsPlaceholder(d)}</div>
@@ -291,8 +292,22 @@ export class UI {
   async _loadOnlineTop(attempt = 0) {
     // Поколение: отбрасываем устаревшие ответы, если меню за время fetch перерисовалось.
     const gen = (this._topGen = (this._topGen || 0) + 1);
-    const top = await fetchTop('all', 8);
+    const resp = await fetchTop('all', 8, null, true);
+    const top = resp ? (resp.top || []) : null;
     if (gen !== this._topGen) return; // меню пересоздано/закрыто — этот ответ уже неактуален
+    // Сезоны: активный сезон знает сервер. До старта — предупреждаем; после — разовый диалог.
+    if (resp && resp.activeSeason != null) {
+      this._season = { act: resp.activeSeason, startsAt: resp.season2Start };
+      const sb = document.getElementById('season-banner');
+      if (sb && resp.activeSeason === 1) {
+        sb.style.display = 'block';
+        sb.innerHTML = '⏳ Завтра — старт <b>Сезона 2</b>! Рейтинг начнётся заново, а этот топ навсегда останется в «Зале славы».';
+      }
+      if (resp.activeSeason === 2 && !this.meta.data.seenSeason2) {
+        this.meta.data.seenSeason2 = true; this.meta.save();
+        this.showSeasonDialog();
+      }
+    }
     const list = document.getElementById('rivals-list');
     if (!list) return; // игрок ушёл из меню — прекращаем
     const me = this.meta.data.playerName;
@@ -327,21 +342,33 @@ export class UI {
     list.innerHTML = html; // list уже получена и проверена выше
   }
 
-  async showFullLeaderboard(period = 'all') {
+  async showFullLeaderboard(period = 'all', season = null) {
     const el = document.getElementById('leaderboard');
     el.style.display = 'flex';
     const me = this.meta.data.playerName;
+    const act = this._season ? this._season.act : 2;
+    const cur = season || act; // какой сезон смотрим
+    const hall = cur === 1 && act === 2; // режим «Зал славы»
     const tabs = [['all', 'Всё время'], ['week', 'Неделя'], ['day', 'Сегодня']];
+    // Вкладки сезонов показываем только после старта Сезона 2 (до — существует лишь один борд)
+    const seasonTabs = act === 2
+      ? `<div class="lb-tabs lb-seasons">
+           <button class="lb-tab ${cur === 2 ? 'on' : ''}" data-s="2">Сезон 2</button>
+           <button class="lb-tab ${cur === 1 ? 'on' : ''}" data-s="1">🏆 Зал славы</button>
+         </div>` : '';
     el.innerHTML = `
       <div class="lb-card">
-        <div class="lb-title">🏅 Онлайн-лидерборд</div>
-        <div class="lb-tabs">${tabs.map(([p, t]) => `<button class="lb-tab ${p === period ? 'on' : ''}" data-p="${p}">${t}</button>`).join('')}</div>
+        <div class="lb-title">${hall ? '🏆 Зал славы · Сезон 1' : '🏅 Онлайн-лидерборд'}</div>
+        ${seasonTabs}
+        ${hall ? '<div class="lb-hall-note">Легенды старого счёта — навсегда в истории</div>'
+               : `<div class="lb-tabs">${tabs.map(([p, t]) => `<button class="lb-tab ${p === period ? 'on' : ''}" data-p="${p}">${t}</button>`).join('')}</div>`}
         <div class="lb-list" id="lb-list"><div class="lb-loading">Загрузка…</div></div>
         <button class="menu-btn" id="lb-close">Закрыть</button>
       </div>`;
     el.querySelector('#lb-close').addEventListener('click', () => { el.style.display = 'none'; el.innerHTML = ''; });
-    for (const b of el.querySelectorAll('.lb-tab')) b.addEventListener('click', () => this.showFullLeaderboard(b.dataset.p));
-    const top = await fetchTop(period, 100);
+    for (const b of el.querySelectorAll('.lb-tab[data-p]')) b.addEventListener('click', () => this.showFullLeaderboard(b.dataset.p, cur));
+    for (const b of el.querySelectorAll('.lb-tab[data-s]')) b.addEventListener('click', () => this.showFullLeaderboard('all', parseInt(b.dataset.s)));
+    const top = await fetchTop(hall ? 'all' : period, 100, cur);
     const list = document.getElementById('lb-list');
     if (!list) return;
     if (!top || !top.length) { list.innerHTML = '<div class="lb-loading">Пока пусто — стань первым!</div>'; return; }
@@ -357,6 +384,27 @@ export class UI {
   }
 
   _esc(s) { return String(s).replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c])); }
+
+  // Разовый диалог о старте Сезона 2: объясняет пустой рейтинг, Зал славы и компенсацию —
+  // гасит негатив «куда делся мой топ». Показывается один раз (флаг seenSeason2).
+  showSeasonDialog() {
+    const comp = this.meta.data.s2comp || 0;
+    const el = document.createElement('div');
+    el.id = 'season-dialog';
+    el.innerHTML = `<div class="season-card">
+      <div class="season-head">🏁 Начался Сезон 2!</div>
+      <div class="season-body">
+        <p>Счёт стал <b>честнее</b>: множители подкручены, очки больше не раздуваются в сотни раз.</p>
+        <p>Рейтинг начался заново — <b>у всех равный старт</b>. Твой личный рекорд пересчитан под новую шкалу.</p>
+        <p>Топ Сезона 1 никуда не делся: он навсегда в <b>🏆 Зале славы</b> (вкладка «Топ»).</p>
+        ${comp ? `<p class="season-comp">🎁 Компенсация за прокачанный множитель: <b>+${comp}🦴</b></p>` : ''}
+      </div>
+      <button class="menu-btn" id="season-ok">Вперёд, к новым рекордам!</button>
+    </div>`;
+    document.body.appendChild(el);
+    el.querySelector('#season-ok').addEventListener('click', () => el.remove());
+    track('season2_dialog', { comp });
+  }
 
   // Магазин косметики (sink для косточек). onChange — применить/обновить (пересоздать собаку).
   // Виджет недельного стрика заходов (loss-aversion крючок, панель «Задания»)
@@ -800,7 +848,7 @@ export class UI {
             <div class="title-name">${title.current.name}</div>
             <div class="title-bar"><i style="width:${Math.floor(title.progress * 100)}%"></i></div>
             ${title.next
-              ? `<div class="title-next">${meta.data.totalScore.toLocaleString('ru')} / ${title.next.need.toLocaleString('ru')} · до «${title.next.gen}» осталось ${(title.next.need - meta.data.totalScore).toLocaleString('ru')}</div>`
+              ? `<div class="title-next">${meta.data.bestScore.toLocaleString('ru')} / ${title.next.need.toLocaleString('ru')} · до «${title.next.gen}» осталось ${(title.next.need - meta.data.bestScore).toLocaleString('ru')}</div>`
               : '<div class="title-next">Максимальный титул!</div>'}
           </div>
         </div>

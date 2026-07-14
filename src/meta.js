@@ -16,27 +16,29 @@ export const DOG_SHOP = [
 
 // 20 разнообразных титулов — путь от новичка до бессмертной легенды аджилити. После
 // последнего звания рост продолжается звёздами (см. title()), чтобы топам было куда расти.
+// Счёт v2 (F4): титул отражает МАСТЕРСТВО — привязан к bestScore (лучший забег), а не к
+// накопленному стажу. Пороги под новую шкалу: хороший забег ≈ 30–80к, топ-марафон 300к+.
 export const TITLES = [
-  { name: 'Щенок-новичок',        gen: 'Щенка-новичка',        need: 0,       color: '#c9a06a' },
-  { name: 'Юниор',                gen: 'Юниора',               need: 2500,    color: '#b8d8a8' },
-  { name: 'Открытый класс',       gen: 'Открытого класса',     need: 7000,    color: '#9adcff' },
-  { name: 'Дебютант ринга',       gen: 'Дебютанта ринга',      need: 14000,   color: '#8fd0e8' },
-  { name: 'Ловкая лапа',          gen: 'Ловкой лапы',          need: 24000,   color: '#7fe056' },
-  { name: 'Мастер трассы',        gen: 'Мастера трассы',       need: 38000,   color: '#66d67a' },
-  { name: 'Гроза барьеров',       gen: 'Грозы барьеров',       need: 58000,   color: '#7fb0e0' },
-  { name: 'Король слалома',       gen: 'Короля слалома',       need: 85000,   color: '#a77fe0' },
-  { name: 'Ас тоннелей',          gen: 'Аса тоннелей',         need: 120000,  color: '#c77fe0' },
-  { name: 'Виртуоз аджилити',     gen: 'Виртуоза аджилити',    need: 165000,  color: '#e07fd0' },
-  { name: 'Чемпион двора',        gen: 'Чемпиона двора',       need: 225000,  color: '#ffb347' },
-  { name: 'Чемпион города',       gen: 'Чемпиона города',      need: 305000,  color: '#ffa733' },
-  { name: 'Чемпион области',      gen: 'Чемпиона области',     need: 410000,  color: '#ff9422' },
-  { name: 'Чемпион страны',       gen: 'Чемпиона страны',      need: 555000,  color: '#ff7e3a' },
-  { name: 'Международный мастер', gen: 'Международного мастера', need: 750000, color: '#ff6b5e' },
-  { name: 'Гранд-чемпион',        gen: 'Гранд-чемпиона',       need: 1000000, color: '#ff5e7a' },
-  { name: 'Легенда ринга',        gen: 'Легенды ринга',        need: 1350000, color: '#ff5ea8' },
-  { name: 'Живая легенда',        gen: 'Живой легенды',        need: 1800000, color: '#f05ed0' },
-  { name: 'Легенда легенд',       gen: 'Легенды легенд',       need: 2400000, color: '#d75eff' },
-  { name: 'Бессмертный чемпион',  gen: 'Бессмертного чемпиона', need: 3200000, color: '#ffd75a' },
+  { name: 'Щенок-новичок',        gen: 'Щенка-новичка',        need: 0,      color: '#c9a06a' },
+  { name: 'Юниор',                gen: 'Юниора',               need: 1500,   color: '#b8d8a8' },
+  { name: 'Открытый класс',       gen: 'Открытого класса',     need: 4000,   color: '#9adcff' },
+  { name: 'Дебютант ринга',       gen: 'Дебютанта ринга',      need: 8000,   color: '#8fd0e8' },
+  { name: 'Ловкая лапа',          gen: 'Ловкой лапы',          need: 14000,  color: '#7fe056' },
+  { name: 'Мастер трассы',        gen: 'Мастера трассы',       need: 22000,  color: '#66d67a' },
+  { name: 'Гроза барьеров',       gen: 'Грозы барьеров',       need: 32000,  color: '#7fb0e0' },
+  { name: 'Король слалома',       gen: 'Короля слалома',       need: 45000,  color: '#a77fe0' },
+  { name: 'Ас тоннелей',          gen: 'Аса тоннелей',         need: 60000,  color: '#c77fe0' },
+  { name: 'Виртуоз аджилити',     gen: 'Виртуоза аджилити',    need: 80000,  color: '#e07fd0' },
+  { name: 'Чемпион двора',        gen: 'Чемпиона двора',       need: 105000, color: '#ffb347' },
+  { name: 'Чемпион города',       gen: 'Чемпиона города',      need: 135000, color: '#ffa733' },
+  { name: 'Чемпион области',      gen: 'Чемпиона области',     need: 170000, color: '#ff9422' },
+  { name: 'Чемпион страны',       gen: 'Чемпиона страны',      need: 215000, color: '#ff7e3a' },
+  { name: 'Международный мастер', gen: 'Международного мастера', need: 270000, color: '#ff6b5e' },
+  { name: 'Гранд-чемпион',        gen: 'Гранд-чемпиона',       need: 340000, color: '#ff5e7a' },
+  { name: 'Легенда ринга',        gen: 'Легенды ринга',        need: 430000, color: '#ff5ea8' },
+  { name: 'Живая легенда',        gen: 'Живой легенды',        need: 550000, color: '#f05ed0' },
+  { name: 'Легенда легенд',       gen: 'Легенды легенд',       need: 700000, color: '#d75eff' },
+  { name: 'Бессмертный чемпион',  gen: 'Бессмертного чемпиона', need: 900000, color: '#ffd75a' },
 ];
 
 // Русская плюрализация: plural(4, ['снаряд', 'снаряда', 'снарядов'])
@@ -136,6 +138,8 @@ export class Meta {
       achCounters: {},    // накопительные счётчики ачивок (perf_hurdle, totalDist, …)
       achClaimed: {},     // { achId: сколько ярусов забрано (0..3) }
       week: { streak: 0, lastDay: null, claimedDay: null, freezeWeek: null }, // недельный стрик заходов
+      scoreV: 2,          // версия шкалы счёта (сезон 2)
+      seenSeason2: false, // разовый диалог о старте Сезона 2
     };
   }
 
@@ -153,6 +157,23 @@ export class Meta {
     if (d.dailyMissions === undefined) d.dailyMissions = null;
     if (!d.cosmeticsOwned) d.cosmeticsOwned = {};
     if (!d.cosmeticsEquip) d.cosmeticsEquip = {};
+    // ---- Миграция на счёт v2 (Сезон 2): множители капнуты, рекорды пересчитываются ----
+    // Старый scoreMult (целый, до ×30) был главным инфлятором — делим личные рекорды на него,
+    // чтобы титул/рекорд остались сопоставимы с новой шкалой. Компенсация: +50🦴 за уровень.
+    if (!d.scoreV || d.scoreV < 2) {
+      try { localStorage.setItem(KEY + '-backup', JSON.stringify(d)); } catch { /* ignore */ }
+      const k = Math.max(1, Math.min(30, Math.round(d.scoreMult || 1)));
+      if (k > 1) {
+        d.bestScore = Math.floor((d.bestScore || 0) / k);
+        d.totalScore = Math.floor((d.totalScore || 0) / k);
+        d.cookies = (d.cookies || 0) + (k - 1) * 50;
+        d.s2comp = (k - 1) * 50; // показать компенсацию в диалоге сезона
+      }
+      if (d.liveRun && d.liveRun.score) d.liveRun.score = Math.floor(d.liveRun.score / k);
+      d.scoreMult = Math.min(2, +(1 + Math.floor((d.missionsCompleted || 0) / 3) * 0.05).toFixed(2));
+      d.scoreV = 2;
+    }
+    if (d.seenSeason2 === undefined) d.seenSeason2 = false;
     // Ретеншн-пакет: счётчики ачивок, клеймы, недельный стрик
     if (!d.achCounters) d.achCounters = {};
     if (!d.achClaimed) d.achClaimed = {};
@@ -186,12 +207,13 @@ export class Meta {
   cosmeticEquip() { return { ...this.data.cosmeticsEquip }; }
 
   title() {
-    const ts = this.data.totalScore;
+    // F4: титул — от лучшего забега (мастерство), а не от накопленного totalScore («стажа»)
+    const ts = this.data.bestScore;
     const last = TITLES[TITLES.length - 1];
     // После последнего фиксированного титула — бесконечные уровни «Легенды», чтобы
     // топ-игрокам всегда было куда расти (порог растёт с уровнем — дальше дороже).
     if (ts >= last.need) {
-      const STEP0 = 500000, GROW = 150000; // звезда N стоит STEP0 + (N-1)*GROW сверху
+      const STEP0 = 150000, GROW = 50000; // звезда N стоит STEP0 + (N-1)*GROW сверху
       let lvl = 0, floor = last.need, cost = STEP0;
       while (ts >= floor + cost) { floor += cost; lvl++; cost += GROW; }
       const deco = (n) => n <= 0 ? '' : ' ' + '★'.repeat(Math.min(5, n)) + (n > 5 ? '×' + n : '');
@@ -264,8 +286,10 @@ export class Meta {
         m.done = true;
         this.data.cookies += m.reward;
         this.data.missionsCompleted++;
-        // Каждые 3 выполненные миссии — перманентный множитель очков (крючок SS)
-        this.data.scoreMult = Math.min(30, 1 + Math.floor(this.data.missionsCompleted / 3));
+        // Каждые 3 выполненные миссии — перманентный множитель очков (крючок SS).
+        // Счёт v2: аддитивный +5% за уровень, кап ×2 — прогресс чувствуется,
+        // но не раздувает очки в 30 раз (аудит #6, F3).
+        this.data.scoreMult = Math.min(2, +(1 + Math.floor(this.data.missionsCompleted / 3) * 0.05).toFixed(2));
         // Каждые 2 миссии — золотой жетон судьи (revive-валюта)
         if (this.data.missionsCompleted % 2 === 0) this.data.tokens = (this.data.tokens || 0) + 1;
         completed.push(m);
