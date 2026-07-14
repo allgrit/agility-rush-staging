@@ -495,7 +495,14 @@ export class UI {
     this._displayScore += (state.score - this._displayScore) * 0.2;
     if (Math.abs(state.score - this._displayScore) < 2) this._displayScore = state.score;
     const sc = Math.floor(this._displayScore);
-    if (sc !== h.score) { h.score = sc; this.scoreEl.textContent = sc.toLocaleString('ru'); }
+    if (sc !== h.score) {
+      h.score = sc;
+      const txt = sc.toLocaleString('ru');
+      this.scoreEl.textContent = txt;
+      // Авто-сжатие: 8+ цифр (10 млн+) не влезают в ряд с бейджем ×N и комбо слева
+      const size = txt.length > 11 ? 'xl' : txt.length > 9 ? 'lg' : '';
+      if (size !== h.scoreSize) { h.scoreSize = size; this.scoreEl.classList.toggle('lg', size === 'lg'); this.scoreEl.classList.toggle('xl', size === 'xl'); }
+    }
     if (state.cookies !== h.cookies) { h.cookies = state.cookies; this.cookieEl.textContent = '🦴 ' + state.cookies; }
     const tokEl = this._tokEl || (this._tokEl = document.getElementById('tokens'));
     if (tokEl && state.tokens !== h.tokens) {
