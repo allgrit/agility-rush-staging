@@ -74,7 +74,7 @@ export class UI {
               : `<div class="title-next">🏆 ${d.totalScore.toLocaleString('ru')} · максимальный уровень!</div>`}
           </div>
         </div>
-        ${rec ? `<div class="recovered-row">💾 Восстановлен прошлый забег: <b>+${rec.cookies}🦴</b>, ${rec.distance} м</div>` : ''}
+        ${rec ? `<div class="recovered-row">💾 Прерванный забег не пропал: <b>+${rec.cookies}🦴</b> и ${rec.distance} м зачтены в прогресс</div>` : ''}
         <div class="dogs-row">
           ${DOG_SHOP.map(dog => {
             const owned = d.unlocked.includes(dog.key);
@@ -90,6 +90,7 @@ export class UI {
         </div>
         <button class="start-btn" id="start-btn">СТАРТ</button>
         <div class="controls-hint">← → полосы · ↑ прыжок · ↓ подкат</div>
+        <div class="meta-scroll">
         <!-- Панель «Задания»: миссии + слово дня + дейлики -->
         <div class="meta-panel on" data-panel="quests">
           <div class="missions">
@@ -145,6 +146,7 @@ export class UI {
           </div>
           <a class="diary-link" href="https://vk.com/chloe.myaussie" target="_blank" rel="noopener">🐾 Дневник Хлои <span class="vk">ВКонтакте ›</span></a>
         </div>
+        </div><!-- /meta-scroll -->
         <!-- Нижняя навигация с бейджами -->
         <div class="menu-nav" id="menu-nav">
           <button data-nav="quests" class="on"><span class="nic">🎯</span><span class="nlb">Задания</span>${dailyLeft > 0 ? `<span class="nbadge">${dailyLeft}</span>` : ''}</button>

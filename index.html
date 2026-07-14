@@ -8,8 +8,8 @@
   // Bootstrap-версия: index.html грузится всегда свежим (network-first / без SW),
   // поэтому знает актуальную сборку. Если у игрока в кэше старьё — один раз чистим
   // все кэши, разрегистрируем старый SW и перезагружаемся. Разрывает «залипание» SW.
-  window.__BUILD = 'staging-v19-ui-fixes';
-  window.__CACHE = 'agility-staging-v15'; // должно совпадать с VERSION в sw.js
+  window.__BUILD = 'staging-v20-menu-fixed-header';
+  window.__CACHE = 'agility-staging-v16'; // должно совпадать с VERSION в sw.js
   (function () {
     try {
       var qs = new URLSearchParams(location.search);
@@ -263,7 +263,7 @@
     align-items: center; justify-content: center; background: rgba(8,12,24,0.78); backdrop-filter: blur(4px);
   }
   .shop-card {
-    width: min(460px, 95vw); max-height: 90vh; display: flex; flex-direction: column;
+    width: min(460px, 95vw); max-height: 90vh; max-height: 90dvh; display: flex; flex-direction: column;
     background: rgba(14,22,38,0.98); border: 1px solid rgba(255,255,255,0.12);
     border-radius: 20px; padding: 16px 16px 14px; box-shadow: 0 24px 80px rgba(0,0,0,0.6);
   }
@@ -442,11 +442,14 @@
     align-items: center; justify-content: center;
     background: linear-gradient(180deg, rgba(10,18,34,0.25), rgba(10,18,34,0.65));
   }
+  /* Карточка меню НЕ скроллится целиком: шапка (герой/титул/собаки/СТАРТ) видна всегда,
+     скроллится только зона панелей (.meta-scroll), табы прижаты к низу. */
   .menu-card {
-    width: min(480px, 94vw); max-height: 96vh; overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
+    --menu-pad: 22px;
+    width: min(480px, 94vw); max-height: 96vh; max-height: 96dvh; overflow: hidden;
+    display: flex; flex-direction: column;
     background: rgba(14,22,38,0.88); border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 22px; padding: 16px 22px 0; text-align: center;
+    border-radius: 22px; padding: 16px var(--menu-pad) 0; text-align: center;
     box-shadow: 0 24px 80px rgba(0,0,0,0.5);
     backdrop-filter: blur(6px);
     scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.3) transparent;
@@ -505,14 +508,18 @@
   .meta-panel.on { display: block; animation: metaIn .18s ease; }
   @keyframes metaIn { from { opacity: 0; transform: translateY(4px); } }
   .meta-panel .missions { margin-top: 0; }
-  /* Табы прилипают к низу карточки: при скролле меты навигация всегда видна,
-     скроллится только контент над ней. */
+  /* Шапка меню не ужимается flex'ом: без этого при нехватке высоты блоки
+     схлопываются и контент панелей визуально наезжает на СТАРТ. */
+  .hero, .title-row, .dogs-row, .start-btn, .controls-hint, .recovered-row { flex-shrink: 0; }
+  /* Зона панелей — единственный скролл карточки; верхняя черта отделяет клип скролла */
+  .meta-scroll { overflow-y: auto; flex: 1; min-height: 40px; -webkit-overflow-scrolling: touch; margin: 0 -6px; padding: 0 6px; border-top: 1px solid rgba(255,255,255,0.07); }
+  /* Табы — вне скролла, всегда прижаты к низу карточки */
   .menu-nav {
-    display: flex; gap: 6px; margin: 10px -22px 0; padding: 8px 14px 10px;
+    display: flex; gap: 6px; margin: 0 calc(-1 * var(--menu-pad, 22px)); padding: 8px 14px 10px;
     border-top: 1px solid rgba(255,255,255,0.09);
-    position: sticky; bottom: 0; z-index: 3;
-    background: rgba(14,22,38,0.97); backdrop-filter: blur(6px);
+    background: rgba(14,22,38,0.97);
     border-radius: 0 0 20px 20px;
+    flex-shrink: 0;
   }
   .menu-nav button { flex: 1; position: relative; background: none; border: none; color: #7f93b4;
     padding: 6px 2px 3px; font-family: inherit; cursor: pointer; transition: color .15s; }
@@ -619,7 +626,8 @@
     .hero img { height: 108px; }
     .recovered-row { font-size: 11px; padding: 5px 9px; }
     .menu-card h1 { font-size: 26px; }
-    .menu-card, .over-card { padding: 12px 16px; }
+    .over-card { padding: 12px 16px; }
+    .menu-card { --menu-pad: 16px; padding: 12px var(--menu-pad) 0; }
     .hero { margin: -12px -16px 8px; }
     .mission-best { display: none; }
     .missions { gap: 4px; margin: 8px 0; }
