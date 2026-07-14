@@ -169,12 +169,43 @@ export class UI {
     if (heroPlay) heroPlay.addEventListener('click', onStart);
     // Нижняя навигация: переключение панелей меты (кнопка «Магазин» открывает оверлей отдельно)
     const navBtns = this.menuEl.querySelectorAll('.menu-nav button[data-nav]:not(#shop-open)');
-    navBtns.forEach(btn => btn.addEventListener('click', () => {
-      const tab = btn.dataset.nav;
+    const setTab = (tab) => {
       navBtns.forEach(b => b.classList.toggle('on', b.dataset.nav === tab));
       this.menuEl.querySelectorAll('.meta-panel').forEach(p => p.classList.toggle('on', p.dataset.panel === tab));
-      track('menu_tab', { tab });
+    };
+    navBtns.forEach(btn => btn.addEventListener('click', () => {
+      this._activeTab = btn.dataset.nav; // запоминаем: перерисовки меню возвращают сюда же
+      setTab(this._activeTab);
+      track('menu_tab', { tab: this._activeTab });
     }));
+    // Перерисовка (клейм подарка/недели/ачивки, покупка) НЕ выбрасывает в «Задания»:
+    // восстанавливаем таб, где был игрок.
+    if (this._activeTab && this._activeTab !== 'shop') setTab(this._activeTab);
+    // Высота карточки НЕ пляшет по табам: скролл-зона резервирует высоту самой
+    // высокой панели (в пределах max-height карточки — излишек срезаем ниже).
+    const ms = this.menuEl.querySelector('.meta-scroll');
+    if (ms) {
+      let maxH = 0;
+      for (const p of ms.querySelectorAll('.meta-panel')) {
+        const wasOn = p.classList.contains('on');
+        p.classList.add('on');
+        maxH = Math.max(maxH, p.offsetHeight);
+        if (!wasOn) p.classList.remove('on');
+      }
+      const card = this.menuEl.querySelector('.menu-card');
+      const clamp = () => {
+        if (this.menuEl.style.display === 'none') return;
+        ms.style.minHeight = maxH + 'px';
+        const over = card.scrollHeight - card.clientHeight;
+        if (over > 0) ms.style.minHeight = Math.max(40, maxH - over) + 'px';
+      };
+      clamp();
+      // Пересчёт при смене вьюпорта: скрытие/показ адресной строки мобильного браузера
+      // меняет доступную высоту — без ре-клампа табы выталкивало за экран.
+      if (this._menuResize) removeEventListener('resize', this._menuResize);
+      this._menuResize = clamp;
+      addEventListener('resize', this._menuResize);
+    }
     // Кнопка имени игрока
     const nameBtn = this.menuEl.querySelector('#name-btn');
     if (nameBtn) nameBtn.addEventListener('click', async () => {
@@ -225,12 +256,7 @@ export class UI {
         track('week_claim', { day: r.dayIdx, amount: r.amount, item: r.bonusItem ? r.bonusItem.id : '' });
         const itemName = r.bonusItem ? (itemOf(r.bonusItem.slot, r.bonusItem.id) || {}).name : null;
         weekBtn.outerHTML = `<div class="week-done">🎉 +${r.amount} 🦴${itemName ? ` + бандана «${itemName}»!` : '!'}</div>`;
-        setTimeout(() => {
-          this.showMenu(this._onStart, this._onSelectDog);
-          // Игрок был в «Наградах» — возвращаем его туда после перерисовки
-          const b = this.menuEl.querySelector('.menu-nav button[data-nav="rewards"]');
-          if (b) b.click();
-        }, 1600);
+        setTimeout(() => this.showMenu(this._onStart, this._onSelectDog), 1600); // таб восстановится сам
       });
     }
     // Клеймы ачивок (кнопки в панели «Ачивки»)
@@ -241,12 +267,7 @@ export class UI {
         if (!amount) return;
         track('achievement_claim', { ach: id, amount });
         btn.outerHTML = `<div class="week-done">🎉 +${amount} 🦴</div>`;
-        setTimeout(() => {
-          this.showMenu(this._onStart, this._onSelectDog);
-          // Возвращаемся на таб ачивок после перерисовки
-          const b = this.menuEl.querySelector('.menu-nav button[data-nav="ach"]');
-          if (b) b.click();
-        }, 1200);
+        setTimeout(() => this.showMenu(this._onStart, this._onSelectDog), 1200); // таб восстановится сам
       });
     });
     for (const card of this.menuEl.querySelectorAll('.dog-card')) {
