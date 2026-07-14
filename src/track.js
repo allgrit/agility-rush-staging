@@ -300,6 +300,19 @@ export class Track {
     return this._add(builders[kind](lane, z));
   }
 
+  // Дуга золотых косточек на высоте полёта фрисби: «собери красиво в воздухе», как в SS.
+  // Детерминизм: позиции задаёт траектория; rng — только лёгкая фаза свупа (вне score-ветки).
+  spawnFlightTrail(lane, startZ, length, rng) {
+    const step = 1.7;
+    const n = Math.min(64, Math.max(6, Math.floor(length / step)));
+    const phase = rng ? rng.float(0, Math.PI * 2) : 0;
+    for (let i = 0; i < n; i++) {
+      const z = startZ - 6 - i * step;
+      const y = 2.55 + 0.5 * Math.sin(phase + i * 0.45); // мягкая волна на высоте диска
+      this._add(buildCookie(lane, z, y, 0, true)); // золотые (×2) — награда за полёт
+    }
+  }
+
   update(dt, dogZ) {
     // Спавн вперёд на 160 м
     while (!this.disabled && this.nextSpawnZ > dogZ - 170) this._spawnChunk();

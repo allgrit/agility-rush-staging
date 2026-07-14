@@ -312,9 +312,12 @@ export class UI {
         const cls = equipped ? 'equipped' : (!owned && !afford ? 'locked' : '');
         const status = equipped ? '✓ надето' : owned ? 'надеть' : (afford ? `${it.price.toLocaleString('ru')} 🦴` : `${it.price.toLocaleString('ru')} 🦴`);
         const col = equipped ? '#7fe056' : owned ? '#9adcff' : (afford ? RARITY[it.rarity].color : '#8a6a6a');
+        // Ярлык редкости (кроме обычных) — чтобы ярусы читались, а легендарки манили.
+        const rar = it.rarity !== 'common'
+          ? `<span class="shop-rar" style="color:${RARITY[it.rarity].color}">${RARITY[it.rarity].name}</span>` : '';
         return `<div class="shop-item ${cls}" data-slot="${it.slot}" data-id="${it.id}">
           <div class="shop-sw" style="background:${swatch(it)}"></div>
-          <div class="shop-info"><div class="shop-name">${this._esc(it.name)}</div><div class="shop-meta" style="color:${col}">${status}</div></div>
+          <div class="shop-info"><div class="shop-name">${this._esc(it.name)} ${rar}</div><div class="shop-meta" style="color:${col}">${status}</div></div>
         </div>`;
       };
       const coats = cat.filter(i => i.slot === 'coat'), necks = cat.filter(i => i.slot === 'neck');

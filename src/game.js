@@ -365,7 +365,8 @@ export class Game {
     if (this.weave) target *= 0.62;
     if (this.onApparatus) {
       if (this.onApparatus.kind === 'aframe') target *= 0.5;
-      else target *= 0.5; // бум и качели требуют аккуратности
+      else if (this.onApparatus.kind === 'seesaw') target *= 0.4; // качели: чуть тише — успеть прижаться на пике
+      else target *= 0.5; // бум требует аккуратности
     }
     if (d.stunT > 0) { d.stunT -= dt; target *= 0.35; }
     const accel = d.speed < target ? 8 : 20;
@@ -444,7 +445,14 @@ export class Game {
     // Ракета-фрисби: полёт за диском
     if (this.flyT > 0) {
       this.flyT -= dt;
-      if (this.flyT <= 0) { d.vy = 0; d.airborne = true; }
+      if (this.flyT <= 0) {
+        d.vy = 0; d.airborne = true;
+        // Приземление с высоты полёта опасно: даём окно неуязвимости, чтобы игрок
+        // не влетел в летальное препятствие сразу после диска (invuln уже гасит летальные).
+        d.stumbleInvulnT = Math.max(d.stumbleInvulnT, 2.2);
+        this.popups.custom('НЕУЯЗВИМ!', 'clean', 50, 40);
+        this.fx.shockwave(new THREE.Vector3(d.x, 0.6, d.z));
+      }
     }
     this._updateFrisbee(dt);
 
@@ -505,6 +513,8 @@ export class Game {
     this.dogModel.root.position.set(d.x, d.y + (pose.surfaceLift || 0), d.z);
     this.dogLight.position.set(d.x, d.y + 1.6, d.z + 0.4);
     this.dogModel.root.rotation.y = 0;
+    // Мигание в кадре неуязвимости — читаемый сигнал i-frames (детерминировано по таймеру).
+    this.dogModel.root.visible = !(d.stumbleInvulnT > 0 && Math.floor(d.stumbleInvulnT * 12) % 2 === 0);
 
     // Системы
     this.world.update(dt, d.z, this.distance);
@@ -881,25 +891,25 @@ export class Game {
         this.onApparatus = null; this.apparatusState = null;
       }
     } else if (e.kind === 'seesaw') {
-      // Окно «прижаться» когда качель коснулась земли
-      if (!st.bangWindow && e.tilt > e.maxTilt * 0.82) {
-        st.bangWindow = 0.5;
+      // Окно «прижаться»: открывается заметно раньше (доска ещё едет вниз, но уже наклонена),
+      // чтобы на полной скорости успеть нажать. Раз открывшись — НЕ гаснет до схода со снаряда.
+      if (!st.banged && e.tilt > e.maxTilt * 0.55) {
+        st.banged = true;
         this.audio.seesawBang();
         this.fx.bigDust(new THREE.Vector3(d.x, 0.1, e.exit));
         this.rig.shake(0.03);
+        // Буфер: игрок нажал «вниз» чуть раньше, чем доска дошла до порога — засчитываем.
+        if (st.wantPress && !st.pressed) {
+          st.pressed = true;
+          this.audio.clean();
+          this.fx.sparks(new THREE.Vector3(d.x, 0.3, d.z), 0xf2c531);
+        }
       }
-      if (st.bangWindow > 0) st.bangWindow -= dt;
       if (d.z <= e.exit + 0.05) {
         e.occupied = false; e.resolved = true;
         this.onApparatus = null;
         if (st.pressed) this._obstacleClean(e, 'perfect', 'КАЧЕЛИ');
-        else if (st.bangWindow != null && e.tilt > e.maxTilt * 0.6) this._obstacleClean(e, 'clean', 'КАЧЕЛИ');
-        else {
-          // Спрыгнул раньше времени — подброс
-          this._fault(e, 'РАНО!');
-          d.launchedT = 0.7; d.vy = 5; d.airborne = false;
-          this.groundingSurface = null;
-        }
+        else this._obstacleClean(e, 'clean', 'КАЧЕЛИ'); // прошёл без прижатия — просто чисто, без наказания
         this.apparatusState = null;
       }
     }
@@ -918,10 +928,13 @@ export class Game {
         this.fx.sparks(new THREE.Vector3(d.x, d.y + 0.2, d.z), 0xf2c531);
       } else if (onDescent) st.contactEarly = true;
     } else if (e.kind === 'seesaw') {
-      if (st.bangWindow > 0 && !st.pressed) {
+      if (st.pressed) return;
+      if (st.banged) {
         st.pressed = true;
         this.audio.clean();
         this.fx.sparks(new THREE.Vector3(d.x, 0.3, d.z), 0xf2c531);
+      } else {
+        st.wantPress = true; // нажал до пика — засчитаем, как только доска ляжет (буфер)
       }
     }
   }
@@ -1230,8 +1243,7 @@ export class Game {
       e.occupied = true;
       this.onApparatus = e;
       this.groundingSurface = e;
-      this.apparatusState = { balance: 0, drift: 0, driftT: 0, maxBal: 0, peaked: false, contactHit: false, contactEarly: false, bangWindow: e.kind === 'seesaw' ? null : undefined, pressed: false };
-      if (e.kind === 'seesaw') this.apparatusState.bangWindow = 0;
+      this.apparatusState = { balance: 0, drift: 0, driftT: 0, maxBal: 0, peaked: false, contactHit: false, contactEarly: false, banged: false, wantPress: false, pressed: false };
       d.lane = e.lane;
       d.airborne = false; d.vy = 0;
     } else if (d.z < e.entry - 1.2) {
@@ -1344,10 +1356,10 @@ export class Game {
     if (this.weave && this._tutWant('weave')) return this._tutShow('weave', this.weave);
     if (this.onApparatus && this._tutWant(this.onApparatus.kind)) {
       // Показываем жест «вниз» только когда окно действия ОТКРЫТО (иначе игрок жмёт «рано»):
-      // качели — доска легла (bangWindow), горка — в зоне контакта. Бум — баланс сразу.
+      // качели — доска легла (banged), горка — в зоне контакта. Бум — баланс сразу.
       const e = this.onApparatus, st = this.apparatusState;
       const ready = e.kind === 'dogwalk' ? true
-        : e.kind === 'seesaw' ? !!(st && st.bangWindow > 0)
+        : e.kind === 'seesaw' ? !!(st && st.banged)
         : e.kind === 'aframe' ? (d.z <= e.contactStart && d.z >= e.contactEnd - 0.3)
         : true;
       if (ready) return this._tutShow(e.kind, e);
@@ -1610,6 +1622,9 @@ export class Game {
       this.audio.bark();
       this.popups.custom('ЛОВИ ФРИСБИ!', 'combo', 50, 34);
       this._spawnFrisbee();
+      // Дуга золотых косточек на высоте полёта — собираешь их красиво в воздухе.
+      const flightLen = Math.max(70, this.dog.speed * 1.3 * this.powerupMax.rocket);
+      this.track.spawnFlightTrail(this.dog.lane, this.dog.z, flightLen, this.rng);
     }
     else if (t === 'multi') this.powerups.multi = this.powerupMax.multi;
     const names = { magnet: 'МАГНИТ', shield: 'ЩИТ', rocket: '', multi: '×2 ОЧКИ' };

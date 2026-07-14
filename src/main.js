@@ -375,7 +375,7 @@ window.__harness = {
         contactReady: game.onApparatus.kind === 'aframe'
           ? (d.z <= game.onApparatus.contactStart && d.z >= game.onApparatus.contactEnd - 0.2)
           : undefined,
-        bangWindow: game.apparatusState ? (game.apparatusState.bangWindow > 0) : false,
+        bangWindow: game.apparatusState ? !!game.apparatusState.banged : false,
         balance: game.apparatusState ? +((game.apparatusState.balance || 0).toFixed(2)) : 0,
       } : null,
       judgeT: +game.judgeT.toFixed(1),
