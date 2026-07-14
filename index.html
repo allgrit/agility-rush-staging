@@ -8,8 +8,8 @@
   // Bootstrap-версия: index.html грузится всегда свежим (network-first / без SW),
   // поэтому знает актуальную сборку. Если у игрока в кэше старьё — один раз чистим
   // все кэши, разрегистрируем старый SW и перезагружаемся. Разрывает «залипание» SW.
-  window.__BUILD = 'staging-v15-gamefeel-shop';
-  window.__CACHE = 'agility-staging-v11'; // должно совпадать с VERSION в sw.js
+  window.__BUILD = 'staging-v16-balance-toast';
+  window.__CACHE = 'agility-staging-v12'; // должно совпадать с VERSION в sw.js
   (function () {
     try {
       var qs = new URLSearchParams(location.search);
@@ -542,15 +542,17 @@
   .menu-btn:hover { background: rgba(255,255,255,0.18); }
 
   /* Миссии-тосты */
-  #mission-toast { position: fixed; top: 90px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+  /* Плашки миссий — ВНИЗУ экрана (трасса там уже пройдена): по центру-верху они
+     закрывали зону появления снарядов, и на скорости игрок врезался вслепую. */
+  #mission-toast { position: fixed; bottom: 88px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column-reverse; gap: 6px; pointer-events: none; }
   .mission-complete {
-    background: rgba(20,34,20,0.9); border: 1px solid #7fe056; color: #d7f5c8;
-    border-radius: 14px; padding: 10px 22px; font-size: 14px; text-align: center;
-    animation: toastIn 0.4s ease-out;
-    box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+    background: rgba(20,34,20,0.72); border: 1px solid rgba(127,224,86,0.7); color: #d7f5c8;
+    border-radius: 12px; padding: 6px 14px; font-size: 12.5px; text-align: center; white-space: nowrap;
+    animation: toastIn 0.35s ease-out;
+    box-shadow: 0 6px 22px rgba(0,0,0,0.35);
   }
   .mission-complete b { color: #ffd587; }
-  @keyframes toastIn { 0% { transform: translateY(-24px); opacity: 0; } }
+  @keyframes toastIn { 0% { transform: translateY(18px); opacity: 0; } }
 
   /* --- Адаптация: на невысоких экранах КОМПАКТИМ (не прячем функциональность!).
      Весь контент доступен через аккуратный скролл карточки. Лидерборд, регистрация

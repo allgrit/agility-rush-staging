@@ -583,9 +583,10 @@ export class UI {
     while (this.missionToast.children.length >= 2) this.missionToast.firstChild.remove();
     const el = document.createElement('div');
     el.className = 'mission-complete';
-    el.innerHTML = `🎯 Миссия выполнена!<br>${def.text} <b>+${def.reward}🦴</b>`;
+    // Одна строка и короткий показ: плашка не должна долго висеть над трассой
+    el.innerHTML = `🎯 ${def.text} <b>+${def.reward}🦴</b>`;
     this.missionToast.appendChild(el);
-    setTimeout(() => el.remove(), 3500);
+    setTimeout(() => el.remove(), 2600);
   }
 
   rewardFlight(count, fromEl) {
