@@ -559,7 +559,7 @@ export class Game {
     this.dogModel.root.visible = !(d.stumbleInvulnT > 0 && Math.floor(d.stumbleInvulnT * 12) % 2 === 0);
 
     // Системы
-    this.world.update(dt, d.z, this.distance);
+    this.world.update(dt, d.z, this.distance, d.speed);
     this.track.update(dt, d.z);
     this.fx.update(dt);
     this.fx.updateMotes(d.z);
@@ -1612,7 +1612,8 @@ export class Game {
     if (this.meta.data.playerName && rs.score > 0) {
       submitScore(this.meta.data.playerName, rs.score, rs.distance).then((r) => {
         if (r && r.rank) this.ui.showOnlineRank(r.rank);
-        track('leaderboard_submit', { nickname_set: true, rank: r && r.rank || 0, score: Math.floor(rs.score) });
+        else if (r && r.ok === false) this.ui.showSubmitNote(r.error); // не молчим о провале засчёта
+        track('leaderboard_submit', { nickname_set: true, rank: r && r.rank || 0, score: Math.floor(rs.score), reject: (r && r.ok === false) ? r.error : undefined });
       });
     }
     this.ui.showGameOver(rs, completed, this.meta,

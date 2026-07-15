@@ -580,6 +580,25 @@ export class UI {
     setTimeout(() => el.remove(), 4000);
   }
 
+  // Результат не засчитан онлайн-топом — раньше это было молчаливо, игрок не понимал причину.
+  showSubmitNote(reason) {
+    const RU = {
+      'bad distance': 'слишком длинный забег (чиним) — обнови игру',
+      'implausible score': 'счёт не прошёл проверку',
+      'stale ts': 'сбились часы устройства',
+      'bad sig': 'ошибка подписи результата',
+      'slow down': 'слишком часто — попробуй позже',
+      'bad score': 'некорректный счёт',
+    };
+    const msg = RU[reason] || 'не удалось отправить результат';
+    while (this.missionToast.children.length >= 2) this.missionToast.firstChild.remove();
+    const el = document.createElement('div');
+    el.className = 'mission-complete';
+    el.innerHTML = `⚠️ Результат не засчитан: ${msg}`;
+    this.missionToast.appendChild(el);
+    setTimeout(() => el.remove(), 5000);
+  }
+
   hideMenu() {
     this.menuEl.style.display = 'none';
     this.hud.style.display = 'block';

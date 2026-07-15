@@ -29,10 +29,18 @@ export async function submitScore(name, score, distance) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ game: GAME, name: nm, score: sc, distance: Math.floor(distance || 0), ts, sv: SCORE_V, sig }),
     });
-    lbStatus.lastSubmit = { ok: res.ok, status: res.status, at: ts };
-    if (!res.ok) return null;
-    return await res.json(); // { ok, rank, season }
-  } catch (e) { lbStatus.lastSubmit = { ok: false, err: String(e).slice(0, 100), at: Date.now() }; return null; }
+    if (!res.ok) {
+      // Раньше провал глотался (return null) — игрок не понимал, почему его нет в топе.
+      // Достаём причину отказа сервера и отдаём наверх, чтобы показать игроку и в 🩺.
+      let error = 'http ' + res.status;
+      try { const b = await res.json(); if (b && b.error) error = b.error; } catch { /* нет тела */ }
+      lbStatus.lastSubmit = { ok: false, status: res.status, error, at: ts };
+      return { ok: false, status: res.status, error };
+    }
+    const body = await res.json(); // { ok, rank, season }
+    lbStatus.lastSubmit = { ok: true, status: res.status, rank: body && body.rank, at: ts };
+    return body;
+  } catch (e) { const error = String(e).slice(0, 100); lbStatus.lastSubmit = { ok: false, error, at: Date.now() }; return { ok: false, error }; }
 }
 
 // season: null — активный сезон сервера; 1 — Зал славы. meta=true вернёт весь ответ

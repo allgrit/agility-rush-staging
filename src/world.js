@@ -187,9 +187,12 @@ export class World {
       // как движение, не стробит). Прозрачный тёмный слой работает во всех зонах суток.
       {
         const crossN = Math.ceil(SEG / 3);
+        // Общий материал: прозрачность привязана к скорости в update (аудит: на старте
+        // «клетка» декоративна; полосы проявляются с разгоном — «мир заводится»)
+        if (!this.crossMat) this.crossMat = new THREE.MeshBasicMaterial({ color: 0x0c1a08, transparent: true, opacity: 0 });
         const crossInst = new THREE.InstancedMesh(
           new THREE.BoxGeometry(TRACK_HALF * 2, 0.012, 0.34),
-          new THREE.MeshBasicMaterial({ color: 0x0c1a08, transparent: true, opacity: 0.34 }),
+          this.crossMat,
           crossN
         );
         for (let d = 0; d < crossN; d++) {
@@ -452,11 +455,19 @@ export class World {
     const FLAGS = 40, POSTS = 14;
     this.sideFlags = new THREE.InstancedMesh(flagGeo,
       new THREE.MeshLambertMaterial({ color: 0xd8434e, flatShading: true }), FLAGS);
-    // Высокий столб-мачта: проносится мимо камеры через верх кадра (главный speed-cue)
+    // Высокий столб-мачта: проносится мимо камеры через верх кадра (главный speed-cue).
+    // Тон приглушён относительно белых стоек снарядов (UX: не спорить с ними в дальней зоне).
     const postGeo = new THREE.BoxGeometry(0.16, 4.6, 0.16);
     postGeo.translate(0, 2.3, 0);
     this.sidePosts = new THREE.InstancedMesh(postGeo,
-      new THREE.MeshLambertMaterial({ color: 0xf0ead8, flatShading: true }), POSTS);
+      new THREE.MeshLambertMaterial({ color: 0xcfc8ba, flatShading: true }), POSTS);
+    // Навершие-фонарь: красный конус в палитру керба; emissive подсвечивает мачты ночью
+    const capGeo = new THREE.ConeGeometry(0.22, 0.42, 6);
+    capGeo.translate(0, 4.75, 0);
+    this.sidePostCaps = new THREE.InstancedMesh(capGeo,
+      new THREE.MeshLambertMaterial({ color: 0xd8434e, emissive: 0x7a1620, flatShading: true }), POSTS);
+    this.sidePostCaps.frustumCulled = false;
+    this.scene.add(this.sidePostCaps);
     this.sideFlags.frustumCulled = false; // короткая лента вдоль трассы, куллинг не окупается
     this.sidePosts.frustumCulled = false;
     this.scene.add(this.sideFlags);
@@ -473,7 +484,7 @@ export class World {
   }
 
   _updateSideProps(dogZ, dist) {
-    const FLAG_STEP = 8, POST_STEP = 9;
+    const FLAG_STEP = 8, POST_STEP = 13; // 9 м стробил краем кадра ~3 раза/с (UX-аудит)
     const write = (mesh, count, step, xBase, yScaleVar) => {
       const firstSlot = Math.floor(dist / step) - 1;
       for (let i = 0; i < count; i++) {
@@ -493,7 +504,10 @@ export class World {
       mesh.instanceMatrix.needsUpdate = true;
     };
     write(this.sideFlags, 40, FLAG_STEP, TRACK_HALF + 2.4, 0.5);
-    write(this.sidePosts, 14, POST_STEP, TRACK_HALF + 0.55, 0.18);
+    write(this.sidePosts, 14, POST_STEP, TRACK_HALF + 1.35, 0.18);
+    // Навершия — те же матрицы, что у мачт
+    for (let i = 0; i < 14; i++) { this.sidePosts.getMatrixAt(i, this._propMtx); this.sidePostCaps.setMatrixAt(i, this._propMtx); }
+    this.sidePostCaps.instanceMatrix.needsUpdate = true;
   }
 
   _bannerTexture() {
@@ -925,10 +939,12 @@ export class World {
     this.cheerZ = z;
   }
 
-  update(dt, dogZ, dist) {
+  update(dt, dogZ, dist, speed = 0) {
     this.time += dt;
     if (this.cheerT > 0) this.cheerT -= dt;
     this._updateSideProps(dogZ, dist);
+    // Поперечные полосы проявляются с разгоном: 0 до 8 м/с → 0.34 к 22 м/с
+    if (this.crossMat) this.crossMat.opacity = 0.34 * Math.max(0, Math.min(1, (speed - 8) / 14));
     // Плавный переход зон в последние 12% зоны
     const { idx, frac } = this.zoneAt(dist);
     const za = ZONES[idx], zb = ZONES[(idx + 1) % ZONES.length];
