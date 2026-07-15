@@ -1,0 +1,13 @@
+{
+  "attempt": 1,
+  "score": 7,
+  "accept": true,
+  "problems": [
+    "Green planks are slightly warped and lumpy instead of clean straight boards",
+    "Some bolt details are missing or very subtle compared with the concept",
+    "Leg/support shapes are simplified and not perfectly aligned to the concept",
+    "Texture is a bit dark and flat but colors generally match"
+  ],
+  "action": "accept",
+  "notes": "Coherent low-poly bench with acceptable silhouette and usable roadside-prop quality."
+}

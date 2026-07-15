@@ -1,0 +1,19 @@
+{
+  "triangles": 2221,
+  "meshes": 1,
+  "materials": 1,
+  "textures": [
+    "map:2048x2048",
+    "normalMap:2048x2048",
+    "roughnessMap:2048x2048",
+    "metalnessMap:2048x2048"
+  ],
+  "size": {
+    "x": 0.5,
+    "y": 1,
+    "z": 0.5
+  },
+  "file": "camera-tower.glb",
+  "kb": 743,
+  "at": "2026-07-15T09:58:26.034Z"
+}

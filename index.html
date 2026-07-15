@@ -8,8 +8,8 @@
   // Bootstrap-версия: index.html грузится всегда свежим (network-first / без SW),
   // поэтому знает актуальную сборку. Если у игрока в кэше старьё — один раз чистим
   // все кэши, разрегистрируем старый SW и перезагружаемся. Разрывает «залипание» SW.
-  window.__BUILD = 'staging-v41-puller-drawcalls';
-  window.__CACHE = 'agility-staging-v41'; // должно совпадать с VERSION в sw.js
+  window.__BUILD = 'staging-v42-2026-07-16';
+  window.__CACHE = 'agility-staging-v42'; // должно совпадать с VERSION в sw.js
   (function () {
     try {
       var qs = new URLSearchParams(location.search);
@@ -417,6 +417,13 @@
   #combo.hot .combo-num { color: #ff9a3d; text-shadow: 0 0 18px rgba(255,120,40,0.8); }
   #combo-bar { width: 110px; height: 7px; background: rgba(255,255,255,0.2); border-radius: 4px; margin-top: 4px; overflow: hidden; }
   #combo-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #ffd587, #ff9a3d); border-radius: 4px; transition: width 0.15s; }
+  /* «Связка» (F2): пилюля прогресса под комбо — видимая комбо-последовательность трассы */
+  #chain {
+    display: none; position: absolute; top: 66px; left: 62px;
+    font-size: 14px; font-weight: 800; color: #8fe6ff; white-space: nowrap;
+    background: rgba(18,48,68,0.5); border: 1px solid rgba(130,215,255,0.55);
+    border-radius: 10px; padding: 3px 9px; text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+  }
   #powerups { position: absolute; top: 92px; left: 62px; display: flex; flex-direction: column; gap: 6px; }
   #powerups .pw { display: flex; align-items: center; gap: 6px; font-size: 20px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5)); }
   #powerups .pw i { display: block; width: 60px; height: 5px; background: linear-gradient(90deg, #9adcff, #4a9ad8); border-radius: 3px; }
@@ -761,6 +768,7 @@
         <div class="combo-num">×2</div>
         <div id="combo-bar"><div id="combo-fill"></div></div>
       </div>
+      <div id="chain"><span id="chain-txt"></span></div>
       <div id="powerups"></div>
       <div id="tug-box" style="display:none">
         <div id="tug-hint">👆</div>

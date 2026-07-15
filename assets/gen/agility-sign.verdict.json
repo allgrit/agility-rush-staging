@@ -1,0 +1,12 @@
+{
+  "attempt": 1,
+  "score": 8,
+  "accept": true,
+  "problems": [
+    "Banner is somewhat thin and simplified from the concept",
+    "Base and pole proportions are slightly compressed",
+    "Back-side design cannot be verified from the provided renders"
+  ],
+  "action": "accept",
+  "notes": "Coherent low-poly banner prop with matching colors and no critical geometry failure."
+}

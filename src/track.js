@@ -52,6 +52,7 @@ export class Track {
     this.tokenSpawned = false; // жетон судьи — максимум 1 за забег
     this.sinceLetter = 0; // pity-счётчик кости-буквы
     this.nextLetterFn = null; // колбэк: какую букву спавнить (из meta)
+    this.chainSeq = 0; // детерминированный ID «Связки» (НЕ Date/random — воспроизводимо по сиду)
   }
 
   _add(rec) {
@@ -245,16 +246,29 @@ export class Track {
     patterns[picked]();
     if (APPARATUS.includes(picked)) this.lastSeen[picked] = idx;
 
-    // Вторая ось: связка снаряд→снаряд без передышки. К главному снаряду (не стене/дыханию)
-    // цепляем лёгкий второй сразу за дальним краем чанка. Растёт с hard, ранняя игра не затронута.
-    if (APPARATUS.includes(picked) && rng.chance(hard * 0.55)) {
-      const lz = this.nextSpawnZ - 6; // впереди всего, что уже заспавнено в этом чанке
-      const link = rng.pick(['hurdle', 'tire', 'tunnel']);
-      const ll = rng.int(0, 2);
-      if (link === 'tunnel') this._add(buildTunnel(ll, lz));
-      else if (link === 'tire') { this._add(buildTire(ll, lz)); this._cookieArc(ll, lz); }
-      else { this._add(buildHurdle(ll, lz)); this._cookieArc(ll, lz); }
-      this.nextSpawnZ = Math.min(this.nextSpawnZ, lz - 14);
+    // Вторая ось (F2), теперь ВИДИМАЯ — явная «Связка»: цепочка снарядов подряд без передышки,
+    // помеченная chainId. Появляется с ранне-средней игры (idx>8, ~270 м), чаще и длиннее с
+    // дистанцией (diff→hard). Скорость НЕ трогаем — растёт только плотность/связность.
+    // Полное чистое прохождение связки награждается бонусом (game.js) — «комбо-последовательность».
+    const pChain = Math.min(0.5, 0.10 + diff * 0.18 + hard * 0.25);
+    if (APPARATUS.includes(picked) && idx > 8 && rng.chance(pChain)) {
+      const len = 2 + (rng.chance(diff) ? 1 : 0) + (rng.chance(hard) ? 1 : 0); // 2..4
+      const cid = ++this.chainSeq;
+      const gap = Math.max(12, estSpeed * 1.05); // ≥ дальности прыжка — честно для реакции на 26 м/с
+      let lz = this.nextSpawnZ - 6; // впереди всего, что уже заспавнено в чанке
+      let lane = rng.int(0, 2);
+      for (let i = 0; i < len; i++) {
+        const k = rng.pick(['hurdle', 'tire', 'tunnel']);
+        let rec;
+        if (k === 'tunnel') rec = this._add(buildTunnel(lane, lz));
+        else if (k === 'tire') { rec = this._add(buildTire(lane, lz)); this._cookieArc(lane, lz); }
+        else { rec = this._add(buildHurdle(lane, lz)); this._cookieArc(lane, lz); }
+        // Метки связки: game.js трекает прогресс и выдаёт бонус за полное прохождение.
+        rec.chainId = cid; rec.chainIndex = i; rec.chainLen = len;
+        lz -= gap;
+        if (rng.chance(0.4)) lane = Math.max(0, Math.min(2, lane + rng.pick([-1, 1])));
+      }
+      this.nextSpawnZ = Math.min(this.nextSpawnZ, lz - 12);
     }
 
     // --- Жетон судьи: один за забег, после ~450 м ---

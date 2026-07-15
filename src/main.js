@@ -140,6 +140,19 @@ if (!new URLSearchParams(location.search).has('harness')) {
 // Кнопка паузы в HUD
 document.getElementById('pause-btn').addEventListener('click', () => game.togglePause());
 
+// Сворачивание в фон (переключение вкладки, блокировка экрана): глушим весь звук и
+// ставим забег на паузу, иначе музыка/эффекты продолжают играть «за спиной». Паузу при
+// возврате не снимаем — игрок продолжит сам.
+function onAppHide() {
+  game.audio.suspend();
+  if (game.state === 'running') game.togglePause();
+}
+function onAppShow() {
+  if (!document.hidden) game.audio.resume();
+}
+document.addEventListener('visibilitychange', () => { document.hidden ? onAppHide() : onAppShow(); });
+window.addEventListener('pagehide', onAppHide);
+
 // Dev-грант для локального теста расходников: ?give на localhost выдаёт косточки+тягачи.
 // На проде (allgrit.github.io) не срабатывает — только localhost/127.*.
 if (/^(localhost|127\.)/.test(location.hostname) && params.has('give')) {

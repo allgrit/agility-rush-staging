@@ -1,0 +1,19 @@
+{
+  "triangles": 1000,
+  "meshes": 1,
+  "materials": 1,
+  "textures": [
+    "map:2048x2048",
+    "normalMap:2048x2048",
+    "roughnessMap:2048x2048",
+    "metalnessMap:2048x2048"
+  ],
+  "size": {
+    "x": 0.44,
+    "y": 0.61,
+    "z": 1
+  },
+  "file": "park-bench.glb",
+  "kb": 480,
+  "at": "2026-07-15T10:40:28.900Z"
+}

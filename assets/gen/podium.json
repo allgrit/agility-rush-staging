@@ -1,0 +1,19 @@
+{
+  "triangles": 1289,
+  "meshes": 1,
+  "materials": 1,
+  "textures": [
+    "map:2048x2048",
+    "normalMap:2048x2048",
+    "roughnessMap:2048x2048",
+    "metalnessMap:2048x2048"
+  ],
+  "size": {
+    "x": 0.96,
+    "y": 0.88,
+    "z": 1
+  },
+  "file": "podium.glb",
+  "kb": 422,
+  "at": "2026-07-15T09:55:46.811Z"
+}

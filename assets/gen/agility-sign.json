@@ -1,0 +1,19 @@
+{
+  "triangles": 940,
+  "meshes": 1,
+  "materials": 1,
+  "textures": [
+    "map:2048x2048",
+    "normalMap:2048x2048",
+    "roughnessMap:2048x2048",
+    "metalnessMap:2048x2048"
+  ],
+  "size": {
+    "x": 0.2,
+    "y": 1,
+    "z": 0.49
+  },
+  "file": "agility-sign.glb",
+  "kb": 495,
+  "at": "2026-07-15T10:36:40.593Z"
+}

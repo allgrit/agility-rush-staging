@@ -1,0 +1,19 @@
+{
+  "triangles": 2765,
+  "meshes": 1,
+  "materials": 1,
+  "textures": [
+    "map:2048x2048",
+    "normalMap:2048x2048",
+    "roughnessMap:2048x2048",
+    "metalnessMap:2048x2048"
+  ],
+  "size": {
+    "x": 0.75,
+    "y": 1,
+    "z": 0.87
+  },
+  "file": "judge-booth.glb",
+  "kb": 611,
+  "at": "2026-07-15T09:48:25.279Z"
+}
