@@ -425,6 +425,7 @@ export class World {
     }
 
     this._buildSideProps();
+    this._buildBackdrop();
     this._buildGenProps();
   }
 
@@ -598,7 +599,7 @@ export class World {
     for (const arr of Object.values(this.genPropPool)) for (const p of arr) { if (!p._used) p.root.visible = false; }
     // Шаровые арки: слот каждые 240 м, позиция — чистая функция дистанции слота
     if (this.balloonArches && this.balloonArches.length) {
-      const ASTEP = 240 * D;
+      const ASTEP = 420 * D; // реже: арка — «чекпойнт»-событие, не обои (фидбек)
       const aBase = Math.floor(dist / ASTEP);
       for (const a of this.balloonArches) a._used = false;
       for (let sOff = 0; sOff < 2; sOff++) {
@@ -681,6 +682,19 @@ export class World {
     return (h % 1000) / 1000;
   }
 
+  // Позиция мачты слота — единственный источник правды (write() и гирлянды)
+  _postAt(slot, dogZ, dist) {
+    const POST_STEP = 13;
+    const h = this._slotHash(slot * 7 + POST_STEP);
+    const side = (slot % 2 === 0) ? 1 : -1;
+    return {
+      x: side * (TRACK_HALF + 1.35 + h * 2.2),
+      z: dogZ - (slot * POST_STEP - dist),
+      topY: 4.6 * (1.2 + 0.18 * h), // высота мачты с учётом вариации масштаба
+      side, h,
+    };
+  }
+
   _updateSideProps(dogZ, dist) {
     const FLAG_STEP = 8, POST_STEP = 13; // 9 м стробил краем кадра ~3 раза/с (UX-аудит)
     const write = (mesh, count, step, xBase, yScaleVar) => {
@@ -703,9 +717,131 @@ export class World {
     };
     write(this.sideFlags, 40, FLAG_STEP, TRACK_HALF + 2.4, 0.5);
     write(this.sidePosts, 14, POST_STEP, TRACK_HALF + 1.35, 0.18);
+    this._updateBackdrop(dogZ, dist);
     // Навершия — те же матрицы, что у мачт
     for (let i = 0; i < 14; i++) { this.sidePosts.getMatrixAt(i, this._propMtx); this.sidePostCaps.setMatrixAt(i, this._propMtx); }
     this.sidePostCaps.instanceMatrix.needsUpdate = true;
+  }
+
+  // «Задник» (SS-принцип «непрерывные боковые стены»): плотный дальний лес в
+  // парковых зонах + гирлянды флажков между мачтами. Отключается ?backdrop=off
+  // (сравнение на месте); полный откат — revert коммита.
+  _buildBackdrop() {
+    const q = (typeof location !== 'undefined') ? new URLSearchParams(location.search) : new URLSearchParams();
+    this.backdropOn = q.get('backdrop') !== 'off';
+    if (!this.backdropOn) return;
+    // --- Дальний лес: один InstancedMesh, ствол+крона одной геометрией с vertex colors
+    const cone = new THREE.ConeGeometry(1.15, 2.9, 6);
+    cone.translate(0, 2.7, 0);
+    const trunk = new THREE.CylinderGeometry(0.16, 0.22, 1.4, 5);
+    trunk.translate(0, 0.7, 0);
+    const paint = (geo, hex) => {
+      const c = new THREE.Color(hex);
+      const n = geo.attributes.position.count;
+      const col = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) { col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
+      geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+      return geo;
+    };
+    paint(cone, 0x39723a); paint(trunk, 0x6d4a2c);
+    const parts = [cone.toNonIndexed(), trunk.toNonIndexed()];
+    let total = 0;
+    for (const g of parts) total += g.attributes.position.count;
+    const pos = new Float32Array(total * 3), nor = new Float32Array(total * 3), col = new Float32Array(total * 3);
+    let o = 0;
+    for (const g of parts) {
+      pos.set(g.attributes.position.array, o * 3);
+      nor.set(g.attributes.normal.array, o * 3);
+      col.set(g.attributes.color.array, o * 3);
+      o += g.attributes.position.count;
+    }
+    const treeGeo = new THREE.BufferGeometry();
+    treeGeo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    treeGeo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+    treeGeo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    this.backTrees = new THREE.InstancedMesh(treeGeo,
+      new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }), 56);
+    this.backTrees.frustumCulled = false;
+    this.scene.add(this.backTrees);
+    // --- Гирлянды флажков между мачтами одной стороны (пролёт 26 м)
+    const flagGeo = new THREE.BufferGeometry();
+    flagGeo.setAttribute('position', new THREE.Float32BufferAttribute([
+      0, 0, 0, 0.11, 0, 0, 0.055, -0.24, 0,
+      0.11, 0, 0, 0, 0, 0, 0.055, -0.24, 0,
+    ], 3));
+    flagGeo.computeVertexNormals();
+    const GAR_SPANS = 12, GAR_FLAGS = 10;
+    this.garland = new THREE.InstancedMesh(flagGeo,
+      new THREE.MeshLambertMaterial({ flatShading: true }), GAR_SPANS * GAR_FLAGS);
+    const palette = [0xd8434e, 0xf2c531, 0x2f6fd0, 0xf5f2ea];
+    for (let i = 0; i < GAR_SPANS * GAR_FLAGS; i++) this.garland.setColorAt(i, new THREE.Color(palette[i % palette.length]));
+    this.garland.instanceColor.needsUpdate = true;
+    this.garland.frustumCulled = false;
+    this.scene.add(this.garland);
+    const lineGeo = new THREE.BufferGeometry();
+    this._garlandPts = new Float32Array(GAR_SPANS * 8 * 2 * 3);
+    lineGeo.setAttribute('position', new THREE.BufferAttribute(this._garlandPts, 3));
+    this.garlandLine = new THREE.LineSegments(lineGeo, new THREE.LineBasicMaterial({ color: 0x3a3630 }));
+    this.garlandLine.frustumCulled = false;
+    this.scene.add(this.garlandLine);
+    this._garSpans = GAR_SPANS; this._garFlags = GAR_FLAGS;
+  }
+
+  _updateBackdrop(dogZ, dist) {
+    if (!this.backdropOn) return;
+    const zoneName = (d) => ZONES[this.zoneAt(Math.max(0, d)).idx].name;
+    // Лес: чистая функция слота (rebase-безопасно), слот 7 м, чередование сторон →
+    // на сторону шаг 14 м + вторая глубина от хэша: сплошная стена в park/sunset
+    if (this.backTrees) {
+      const TSTEP = 7, N = 56;
+      const first = Math.floor(dist / TSTEP) - 4;
+      for (let i = 0; i < N; i++) {
+        const slot = first + i;
+        const h = this._slotHash(slot * 11 + 3);
+        const side = (slot % 2 === 0) ? 1 : -1;
+        const zn = zoneName(slot * TSTEP);
+        const on = zn === 'park' || zn === 'sunset';
+        const x = side * (13.5 + h * 5.5);
+        const z = dogZ - (slot * TSTEP - dist);
+        const sc = 1.05 + h * 0.85;
+        this._propMtx.makeRotationY(h * 6.28);
+        this._propScaleV.set(sc, sc * (0.9 + h * 0.3), sc);
+        this._propMtx.scale(this._propScaleV);
+        this._propMtx.setPosition(x, on ? 0 : -60, z);
+        this.backTrees.setMatrixAt(i, this._propMtx);
+      }
+      this.backTrees.instanceMatrix.needsUpdate = true;
+    }
+    // Гирлянды: пролёты между мачтами одной стороны (slot, slot+2), провис-парабола
+    if (this.garland) {
+      const firstPost = Math.floor(dist / 13) - 1;
+      let fi = 0, li = 0;
+      const A = new THREE.Vector3(), B = new THREE.Vector3(), P = new THREE.Vector3(), Q = new THREE.Vector3();
+      for (let sp = 0; sp < this._garSpans; sp++) {
+        const slot = firstPost + sp;
+        const a = this._postAt(slot, dogZ, dist);
+        const b = this._postAt(slot + 2, dogZ, dist); // та же сторона (чётность)
+        A.set(a.x, Math.min(a.topY, b.topY) - 0.25, a.z);
+        B.set(b.x, Math.min(a.topY, b.topY) - 0.25, b.z);
+        const sag = 0.7;
+        for (let f = 0; f < this._garFlags; f++) {
+          const t = (f + 0.5) / this._garFlags;
+          P.lerpVectors(A, B, t);
+          P.y -= sag * Math.sin(Math.PI * t); // флажки висят на шнуре — та же кривая
+          this._propMtx.makeRotationY(a.side < 0 ? Math.PI / 2 : -Math.PI / 2);
+          this._propMtx.setPosition(P.x, P.y, P.z);
+          this.garland.setMatrixAt(fi++, this._propMtx);
+        }
+        for (let sgm = 0; sgm < 8; sgm++) {
+          const t0 = sgm / 8, t1 = (sgm + 1) / 8;
+          P.lerpVectors(A, B, t0); P.y -= sag * Math.sin(Math.PI * t0);
+          Q.lerpVectors(A, B, t1); Q.y -= sag * Math.sin(Math.PI * t1);
+          this._garlandPts.set([P.x, P.y, P.z, Q.x, Q.y, Q.z], li); li += 6;
+        }
+      }
+      this.garland.instanceMatrix.needsUpdate = true;
+      this.garlandLine.geometry.attributes.position.needsUpdate = true;
+    }
   }
 
   _bannerTexture() {
