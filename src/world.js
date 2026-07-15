@@ -76,7 +76,9 @@ export class World {
     const jitterGeo = (geo, amp, seedBase) => {
       const pos = geo.attributes.position;
       for (let v = 0; v < pos.count; v++) {
-        const h = Math.sin(v * 127.1 + seedBase * 311.7) * 43758.5453;
+        // Хэш от позиции, не от индекса: геометрия неиндексирована, дубликаты одной
+        // точки обязаны сдвигаться одинаково — иначе щели между гранями («дырки»)
+        const h = Math.sin(pos.getX(v) * 127.1 + pos.getY(v) * 311.7 + pos.getZ(v) * 74.7 + seedBase * 19.19) * 43758.5453;
         const r = (h - Math.floor(h)) - 0.5;
         pos.setXYZ(v, pos.getX(v) + r * amp, pos.getY(v) + r * amp * 0.8, pos.getZ(v) - r * amp);
       }
@@ -502,25 +504,37 @@ export class World {
     if (!this.genPropPool) return;
     const D = this._genPropsPeriodMul || 1;
     const STEP = 80 * D; // слот кластера
-    const zone = this.currentZone;
     // Сначала прячем все клоны, затем расставляем нужные (окно: 2-3 слота впереди)
     for (const arr of Object.values(this.genPropPool)) for (const p of arr) { p._used = false; }
     const baseSlot = Math.floor(dist / STEP);
+    // Зона — функция ДИСТАНЦИИ, не текущего кадра: раскладка слота обязана быть
+    // стабильной. Выбор по currentZone заставлял видимый впереди кластер
+    // ПЕРЕВЫБИРАТЬСЯ при пересечении границы зоны (флаги исчезали на глазах).
+    const zoneNameAt = (d) => ZONES[this.zoneAt(Math.max(0, d)).idx].name;
+    // Трибуна живёт до ~170 м за/до границы зоны (рецикл шагом 28, окно 168, on
+    // фиксируется по зоне В МОМЕНТ рецикла) — поэтому «есть ли трибуны у слота»
+    // проверяем с буфером ±170, а не по зоне точки (скамейки въезжали в трибуны).
+    const standsNear = (d) => [d - 170, d, d + 170].some((x) => {
+      const n = zoneNameAt(x);
+      return n === 'stadium' || n === 'night';
+    });
     for (let sOff = 0; sOff < 3; sOff++) {
       const slot = baseSlot + sOff;
       const h = this._slotHash(slot * 17 + 5);
-      // Кластер по слоту: только подходящие текущей зоне (фиксируется на момент показа)
+      const slotDist = slot * STEP + h * STEP * 0.35; // дистанция центра кластера
+      const zone = zoneNameAt(slotDist);
+      // Кластер по слоту: только подходящие зоне СЛОТА (стабильно навсегда)
       const fit = this.genClusters.filter(c => !c.zones || c.zones.includes(zone));
       if (!fit.length) continue;
       const cl = fit[Math.floor(h * fit.length) % fit.length];
       const side = (slot % 2 === 0) ? 1 : -1;
-      const zBase = dogZ - (slot * STEP + h * STEP * 0.35 - dist);
+      const zBase = dogZ - (slotDist - dist);
       const rel = dogZ - zBase;
       if (rel < -40 || rel > 170) continue;
       const xBase = TRACK_HALF + 1.9 + h * 1.0;
       // Трибуны: центр на ±(TRACK_HALF+4.4), глубина 2.6 → передняя грань ≈ ±7.3.
-      // В зонах с трибунами пропы не заходят за неё (иначе пересечения с блоками).
-      const standsOn = zone === 'stadium' || zone === 'night';
+      // В зонах с трибунами (и в буфере ±170 у границ) пропы не заходят за неё.
+      const standsOn = standsNear(slotDist);
       // Юбка трибуны выступает к трассе до ~±6.9 (центр 8.6 − skirt 1.5 − толщина):
       // внешний КРАЙ пропа не дальше 6.8. Крупные пропы, не влезающие в коридор,
       // скипаются здесь автоматически (см. проверку ниже) — их место в парке/закате.

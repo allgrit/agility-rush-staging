@@ -67,28 +67,30 @@ export function buildTire(lane, z) {
   const g = new THREE.Group();
   const frameMat = std(0x8a68c8);
   const frame = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.08, 0.08), frameMat);
-  frame.position.y = 1.85;
+  frame.position.y = 2.05;
   g.add(frame);
   for (const s of [-1, 1]) {
-    const post = new THREE.Mesh(new THREE.BoxGeometry(0.08, 1.85, 0.08), frameMat);
-    post.position.set(s * 0.85, 0.92, 0);
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.08, 2.05, 0.08), frameMat);
+    post.position.set(s * 0.85, 1.02, 0);
     post.castShadow = true;
     g.add(post);
   }
+  // Центр совпадает с центром корпуса собаки на апексе прыжка (JUMP_V²/2g + 0.35):
+  // идеальный прыжок = пролёт ровно сквозь кольцо, а не поверх него
   const tire = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.09, 10, 24), std(0xe0603a));
-  tire.position.y = 0.95;
+  tire.position.y = 1.32;
   tire.castShadow = true;
   g.add(tire);
   // Стяжки
-  for (const [x, y] of [[-0.6, 1.5], [0.6, 1.5]]) {
-    const rope = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.6, 4), std(0x555555));
+  for (const [x, y] of [[-0.6, 1.93], [0.6, 1.93]]) {
+    const rope = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.35, 4), std(0x555555));
     rope.position.set(x * 0.7, y, 0);
     rope.rotation.z = x < 0 ? -0.5 : 0.5;
     g.add(rope);
   }
   g.position.set(LANE_X[lane], 0, z);
   const rec = {
-    kind: 'tire', lane, z, group: g, centerY: 0.95, resolved: false, flashT: 0,
+    kind: 'tire', lane, z, group: g, centerY: 1.32, resolved: false, flashT: 0,
     tire,
     update(dt) {
       if (this.flashT > 0) {
@@ -111,7 +113,7 @@ export function buildTunnel(lane, z, length = 6) {
   const nRings = Math.floor(length / 0.5);
   for (let i = 0; i <= nRings; i++) {
     const ring = new THREE.Mesh(new THREE.TorusGeometry(R, 0.035, 6, 20), i % 2 ? tunnelMat : std(0xf0e6d8, { side: THREE.DoubleSide }));
-    ring.position.set(0, R * 0.9, -length / 2 + (i / nRings) * length);
+    ring.position.set(0, R + 0.02, -length / 2 + (i / nRings) * length); // труба ЛЕЖИТ на земле (R*0.9 утапливало низ на −0.055 — газон просвечивал внутри)
     ring.castShadow = true;
     rings.push(ring);
     g.add(ring);
@@ -122,14 +124,14 @@ export function buildTunnel(lane, z, length = 6) {
     std(0xc23b46, { side: THREE.BackSide })
   );
   cloth.rotation.x = Math.PI / 2;
-  cloth.position.y = R * 0.9;
+  cloth.position.y = R + 0.02;
   g.add(cloth);
   const clothOuter = new THREE.Mesh(
     new THREE.CylinderGeometry(R + 0.01, R + 0.01, length, 16, 6, true),
     std(0xd8434e, { side: THREE.FrontSide })
   );
   clothOuter.rotation.x = Math.PI / 2;
-  clothOuter.position.y = R * 0.9;
+  clothOuter.position.y = R + 0.02;
   clothOuter.castShadow = true;
   g.add(clothOuter);
   g.position.set(LANE_X[lane], 0, z);
@@ -595,7 +597,8 @@ export function buildHay(lane, z) {
   g.position.set(LANE_X[lane], 0, z);
   return {
     kind: 'hay', lane, z, group: g, resolved: false,
-    hazard: true, lethal: true, halfW: 0.8, height: 1.5,
+    // halfD обязателен: без него dz < (halfD+0.3) даёт NaN и стог молча не убивает
+    hazard: true, lethal: true, halfW: 0.8, halfD: 0.55, height: 1.5,
     update() { /* статичен */ },
   };
 }

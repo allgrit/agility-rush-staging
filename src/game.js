@@ -1418,10 +1418,10 @@ export class Game {
     }
     // Обучение обходу: летальная помеха в нашей полосе — показываем свайп на свободную сторону.
     if (this._tutWant('dodge')) {
-      const haz = this.track.entities.find(e => e && !e.resolved && (e.kind === 'cart' || e.kind === 'fence')
+      const haz = this.track.entities.find(e => e && !e.resolved && (e.kind === 'cart' || e.kind === 'fence' || e.kind === 'hay')
         && this._laneMatch(e) && (d.z - e.z) > 2 && (d.z - e.z) < 14);
       if (haz) {
-        const danger = (lane) => this.track.entities.some(e => e && !e.resolved && (e.kind === 'cart' || e.kind === 'fence')
+        const danger = (lane) => this.track.entities.some(e => e && !e.resolved && (e.kind === 'cart' || e.kind === 'fence' || e.kind === 'hay')
           && e.lane === lane && (d.z - e.z) > -1 && (d.z - e.z) < 16);
         const free = [d.lane - 1, d.lane + 1].filter(l => l >= 0 && l <= 2 && !danger(l));
         if (free.length) {
