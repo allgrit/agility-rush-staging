@@ -48,6 +48,9 @@ const TUT_MAX_SHOWS = 5; // сколько раз максимум показа�
 // барьер/тоннель/бум/шина/стол — 93–100% чисто (лёгкие). Стол был 300 (переоценён — 100%
 // идеально у всех), снижен: премию отдаём тем, кто реально сложный.
 const SCORE_CLEAN = 100, SCORE_PERFECT_MULT = 2, SCORE_COOKIE = 10;
+// Расходник «Тягач»: длительность окна (сек), множитель скорости, сколько секунд игрушка
+// летит ВПЕРЕДИ прежде чем перейти в зубы.
+const TUG_SECS = 22, TUG_SPEED = 1.2, TUG_AHEAD = 3;
 // Счёт v2 (сезон 2): комбо в очках капится — раньше стек «комбо × ×2 × ×2 × metaMult(30)»
 // раздувал очки до бессмысленных чисел и ломал сравнимость лидерборда (аудит #6, F3).
 const SCORE_COMBO_CAP = 10;
@@ -171,6 +174,11 @@ export class Game {
     this.cookieStreak = 0; this.cookieStreakT = 0;
     this.powerups = { magnet: 0, shield: 0, rocket: 0, multi: 0 };
     this.powerupMax = { magnet: 8, shield: 1, rocket: 4.5, multi: 10 };
+    this.tugT = 0;          // окно активного тягача (детерминированный таймер, как boostT)
+    this._tugSaved = false; // визуал: тягач только что спас от краша (игрушка в зубы)
+    this._tugJustOn = false; // визуал: тягач только что задеплоен (для анимации выброса)
+    if (this.dogModel && this._dogGlowOn) { this._applyDogGlow(this.dogModel, 0); this._dogGlowOn = false; } // снять сияние-emissive
+    if (this._tugVis) { this._tugVis.endT = 0; this._tugVis.group.visible = false; this._tugVis.fx.visible = false; } // без призрачного визуала на старте (ревью)
     this.runStats = {
       score: 0, distance: 0, cookies: 0, maxCombo: 0, perfects: 0, faults: 0,
       cleanObstacles: 0, cleanHurdles: 0, perfectWeaves: 0, tunnels: 0, tables: 0,
@@ -392,6 +400,7 @@ export class Game {
     let target = Math.min(MAX_SPEED, BASE_SPEED + this.distance * 0.012);
     if (this.speedModT > 0) { this.speedModT -= dt; target *= this.speedMod; }
     if (this.boostT > 0) { this.boostT -= dt; target *= 1.25; }
+    if (this.tugT > 0) target *= TUG_SPEED; // тягач тянет вперёд
     if (this.flyT > 0) target *= 1.3;
     if (this.weave) target *= 0.62;
     if (this.onApparatus) {
@@ -441,6 +450,7 @@ export class Game {
     if (this.inputRecentSlide > 0) this.inputRecentSlide -= dt;
     if (d.slideT > 0) d.slideT = Math.max(0, d.slideT - dt);
     if (this.tableBoostT > 0) this.tableBoostT -= dt;
+    if (this.tugT > 0) this.tugT -= dt; // окно тягача истекает — по таймеру игрушка «в зубы»
     if (this.cookieStreakT > 0) { this.cookieStreakT -= dt; } else this.cookieStreak = 0;
     for (const k of Object.keys(this.powerups)) {
       if (k === 'shield') continue;
@@ -557,6 +567,7 @@ export class Game {
     this.dogModel.root.rotation.y = 0;
     // Мигание в кадре неуязвимости — читаемый сигнал i-frames (детерминировано по таймеру).
     this.dogModel.root.visible = !(d.stumbleInvulnT > 0 && Math.floor(d.stumbleInvulnT * 12) % 2 === 0);
+    this._updateTugVisual(dtRaw); // визуал тягача (кольцо+свечение+молнии), только render
 
     // Системы
     this.world.update(dt, d.z, this.distance, d.speed);
@@ -580,7 +591,10 @@ export class Game {
     hs.powerups = this.powerups;     // живые ссылки: updateHUD читает поля СРАЗУ и не хранит ссылку
     hs.powerupMax = this.powerupMax; // (безопасно, как и было до диффинга)
     hs.danger = this.judgeT > 0;
-    hs.boost = this.boostT > 0 || this.flyT > 0 || this.tableBoostT > 0;
+    hs.boost = this.boostT > 0 || this.flyT > 0 || this.tableBoostT > 0 || this.tugT > 0;
+    // Таймеры бустов на HUD (слева вверху): тягач + tableBoost к пауэрапам. tugCount — для иконки-активации.
+    hs.tugT = this.tugT; hs.tugMax = TUG_SECS; hs.tugCount = this.meta.consumableCount('tug');
+    hs.tableBoostT = this.tableBoostT; hs.tableBoostMax = 10;
     // Juice (#27): speed-lines растут с реальной скоростью (0 до 18 м/с → максимум к 26),
     // не только при бусте. Чисто презентационная величина.
     hs.speedNorm = Math.max(0, Math.min(1, (d.speed - 18) / 8));
@@ -1040,12 +1054,12 @@ export class Game {
 
       // Пикапы
       if (e.pickup) {
-        const magnetR = this.powerups.magnet > 0 ? 5.4 : 0.62; // магнит тянет из всех полос
+        const magnetR = (this.powerups.magnet > 0 || this.tugT > 0) ? 5.4 : 0.62; // магнит (или тягач) тянет из всех полос
         const dz = d.z - e.group.position.z;
         const ddx = d.x - e.group.position.x;
         const ddy = (d.y + 0.4) - e.group.position.y;
         const dist2 = ddx * ddx + dz * dz + ddy * ddy;
-        if (this.powerups.magnet > 0 && dist2 < magnetR * magnetR && e.kind === 'cookie') {
+        if ((this.powerups.magnet > 0 || this.tugT > 0) && dist2 < magnetR * magnetR && e.kind === 'cookie') {
           // Пылесос: чем ближе, тем быстрее всасывает
           const dist = Math.sqrt(dist2);
           const k = 6 + 22 * (1 - dist / magnetR);
@@ -1505,6 +1519,8 @@ export class Game {
   }
 
   _death(e, disqualified = false) {
+    // Тягач ловит удар: спасает от краша и ломается (в зубы). Одноразово в окне tugT.
+    if (this.tugT > 0 && this.state === 'running') { this._tugCrashSave(e); return; }
     this._lastHazardKind = e && e.kind ? e.kind : (disqualified ? 'judge' : 'stumble');
     const price = Math.pow(2, this.reviveCount); // 1, 2, 4, 8...
     if ((this.meta.data.tokens || 0) >= price && this.state === 'running') {
@@ -1521,6 +1537,113 @@ export class Game {
       return;
     }
     this._doDeath(disqualified);
+  }
+
+  // Тягач поймал летальный удар: обнуляем окно (доска ушла в зубы), спасаем забег.
+  _tugCrashSave(e) {
+    this.tugT = 0;
+    this._tugSaved = true; // визуал/аудио отработают на этом кадре в тик-визуале
+    if (e) e.resolved = true;
+    this.dog.stumbleInvulnT = 1.2;
+    this.hitstopT = 0.08;
+    this.runStats.tugSaves = (this.runStats.tugSaves || 0) + 1;
+    const d = this.dog;
+    this.fx.poof(new THREE.Vector3(d.x, 0.8, d.z));
+    this.fx.shockwave(new THREE.Vector3(d.x, 0.2, d.z));
+    this.fx.confetti(new THREE.Vector3(d.x, 1, d.z));
+    this.audio.boost(); this.audio.bark();
+    this.popups.custom('ПУЛЛЕР СПАС!', 'clean', 50, 40);
+    if (this.rig.shake) this.rig.shake(0.02);
+  }
+
+  // Активация тягача по ходу забега (тап по HUD-иконке). Списывает 1 из инвентаря.
+  useTug() {
+    if (this.state !== 'running' || this.tugT > 0) return false; // не активен / без стакинга
+    if (!this.meta.useConsumable('tug')) return false;           // нет в наличии
+    this.tugT = TUG_SECS;
+    this._tugJustOn = true;
+    this.audio.boost();
+    this.popups.custom('ПУЛЛЕР!', 'perfect', 50, 40);
+    return true;
+  }
+
+  // Ленивое создание визуала тягача (кольцо-Puller + фиолетовое свечение + молнии). Только render.
+  _buildTugVisual() {
+    const spr = (draw, size = 128) => {
+      const cv = document.createElement('canvas'); cv.width = cv.height = size;
+      draw(cv.getContext('2d'), size);
+      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+      return s;
+    };
+    const group = new THREE.Group();
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.19, 0.036, 12, 32),
+      new THREE.MeshStandardMaterial({ color: 0x9b5de5, roughness: 0.32, flatShading: true, emissive: 0x40158f }));
+    group.add(ring);
+    const fx = new THREE.Group();
+    // Без облака-ореола: сияние наносим на саму шкурку собаки (emissive, см. _applyDogGlow).
+    // Точечный свет даёт лёгкую фиолетовую подсветку модели.
+    const light = new THREE.PointLight(0xb98cff, 2.2, 3.6, 2); light.position.set(0, 0.55, 0.25); fx.add(light);
+    const boltDraw = (ctx, s) => { ctx.strokeStyle = '#ffe23a'; ctx.lineWidth = s * 0.1; ctx.lineJoin = 'round'; ctx.shadowColor = '#fff2a0'; ctx.shadowBlur = s * 0.08; ctx.beginPath(); ctx.moveTo(s * 0.6, s * 0.1); ctx.lineTo(s * 0.38, s * 0.5); ctx.lineTo(s * 0.55, s * 0.52); ctx.lineTo(s * 0.34, s * 0.9); ctx.stroke(); };
+    // 2 молнии, ниже уровня головы и полупрозрачные — сбоку, НЕ перекрывают трассу и верх.
+    const bolts = [[-0.5, 0.32], [0.52, 0.4]].map(([x, y]) => { const b = spr(boltDraw); b.scale.setScalar(0.16); b.material.opacity = 0.5; b.position.set(x, y, 0.05); fx.add(b); return b; });
+    this._tugVis = { group, ring, fx, light, bolts, endT: 0 };
+  }
+
+  // Визуал тягача по кадру (presentation-only). Игрушка крепится к СЦЕНЕ (мир), НЕ к собаке:
+  // на горке собака кренится (surfacePitch), а Puller остаётся ровно горизонтальным.
+  // Фаза: TUG_AHEAD сек летит впереди (тянет) → плавно уходит в зубы и остаётся там до конца.
+  _updateTugVisual(dtRaw) {
+    const dm = this.dogModel; if (!dm || !dm.root) return;
+    const active = this.tugT > 0;
+    if (!this._tugVis && !active) return;
+    if (!this._tugVis) this._buildTugVisual();
+    const v = this._tugVis;
+    if (v.group.parent !== this.scene) this.scene.add(v.group); // мир, без наследования наклона
+    if (v.fx.parent !== this.scene) this.scene.add(v.fx);
+    if (active) v.endT = 0.6; else if (v.endT > 0) v.endT -= dtRaw;
+    const on = active || v.endT > 0;
+    if (v.group.visible !== on) { v.group.visible = on; v.fx.visible = on; }
+    if (!on) { if (this._dogGlowOn) { this._applyDogGlow(dm, 0); this._dogGlowOn = false; } this._tugSaved = false; return; }
+    this._dogGlowOn = true;
+    this._tugVisT = (this._tugVisT || 0) + dtRaw;
+    const t = this._tugVisT;
+    const p = dm.root.position;                 // мировая позиция собаки (собака бежит в -Z)
+    const headY = p.y + 0.5;
+    // Фаза перехода «впереди → в зубы»: первые TUG_AHEAD сек — впереди, затем за ~0.9с в пасть.
+    const elapsed = TUG_SECS - this.tugT;
+    const toMouth = active ? Math.max(0, Math.min(1, (elapsed - TUG_AHEAD) / 0.9)) : 1;
+    const aheadZ = p.z - 1.35, mouthZ = p.z - 0.5;
+    const rz = aheadZ + (mouthZ - aheadZ) * toMouth;
+    const ry = headY + (0.22 - toMouth * 0.2) + Math.sin(t * 6) * 0.02;
+    v.ring.position.set(p.x, ry, rz);
+    // Ориентация задаётся В МИРЕ (ровно, без крена за собакой).
+    if (toMouth > 0.6) v.ring.rotation.set(Math.PI / 2, 0, 0);        // в зубах — горизонтально плашмя
+    else v.ring.rotation.set(0.12, 0, v.ring.rotation.z + dtRaw * 4);  // впереди — лицом к камере, ровно
+    v.fx.position.set(p.x, headY, p.z);           // свет/молнии вокруг собаки в мире
+    const pulse = 0.85 + Math.sin(t * 5) * 0.15;
+    v.light.intensity = 2.2 * pulse;
+    for (const b of v.bolts) b.material.opacity = 0.5 * pulse;
+    this._applyDogGlow(dm, 0.4 * pulse);          // сияние на самой шкурке (emissive), а не облако
+    this._tugSaved = false;
+  }
+
+  // Фиолетовое сияние на материалах собаки (emissive). k∈[0..1]; k=0 — восстановить исходный.
+  // Исходный emissive каждого материала запоминаем один раз, чтобы корректно снять эффект.
+  _applyDogGlow(dm, k) {
+    if (!dm || !dm.root) return;
+    const purple = this._tugPurple || (this._tugPurple = new THREE.Color(0x9b5de5));
+    const tmp = this._tugGlowTmp || (this._tugGlowTmp = new THREE.Color());
+    dm.root.traverse((o) => {
+      if (!o.isMesh || !o.material) return;
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      for (const m of mats) {
+        if (!m.emissive) continue;
+        if (m.__tugOrigEmis === undefined) m.__tugOrigEmis = m.emissive.getHex();
+        if (k <= 0) m.emissive.setHex(m.__tugOrigEmis);
+        else m.emissive.copy(tmp.setHex(m.__tugOrigEmis).lerp(purple, Math.min(1, k)));
+      }
+    });
   }
 
   acceptRevive(price) {

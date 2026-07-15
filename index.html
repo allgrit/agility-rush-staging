@@ -8,8 +8,8 @@
   // Bootstrap-версия: index.html грузится всегда свежим (network-first / без SW),
   // поэтому знает актуальную сборку. Если у игрока в кэше старьё — один раз чистим
   // все кэши, разрегистрируем старый SW и перезагружаемся. Разрывает «залипание» SW.
-  window.__BUILD = 'staging-v37-beam-floor';
-  window.__CACHE = 'agility-staging-v33'; // должно совпадать с VERSION в sw.js
+  window.__BUILD = 'staging-v38-puller';
+  window.__CACHE = 'agility-staging-v38'; // должно совпадать с VERSION в sw.js
   (function () {
     try {
       var qs = new URLSearchParams(location.search);
@@ -60,8 +60,8 @@
       var staleKey = '__stale_' + window.__BUILD;
       if (sessionStorage.getItem(staleKey)) return;
       caches.keys().then(function (ks) {
-        // Устаревший staging-кэш ловим отдельно от production-кэшей.
-        var stale = ks.filter(function (k) { return k.indexOf('agility-staging') === 0 && k !== window.__CACHE; });
+        // Устаревший кэш — любой agility-rush-* кроме текущего. Ловит залипших с 1-го захода.
+        var stale = ks.filter(function (k) { return k.indexOf('agility-rush') === 0 && k !== window.__CACHE; });
         if (!stale.length) return;
         sessionStorage.setItem(staleKey, '1');
         sessionStorage.removeItem('__busted');
@@ -310,6 +310,19 @@
   .shop-item:hover { border-color: rgba(255,213,135,0.4); }
   .shop-item.equipped { border-color: #7fe056; background: rgba(127,224,86,0.1); }
   .shop-item.locked { opacity: 0.55; }
+  /* Расходники в магазине */
+  .shop-cons { display: flex; flex-direction: column; gap: 8px; }
+  .cons-item { display: flex; align-items: center; gap: 10px; background: rgba(150,95,240,0.1); border: 1px solid rgba(180,120,255,0.35); border-radius: 12px; padding: 8px 10px; }
+  .cons-ic { font-size: 30px; flex-shrink: 0; }
+  .cons-info { flex: 1; min-width: 0; }
+  .cons-info .shop-name { font-size: 14px; font-weight: 700; }
+  .cons-own { color: #c79bff; font-weight: 800; }
+  .cons-desc { font-size: 11px; color: #9db4d4; line-height: 1.3; margin-top: 2px; }
+  .cons-buy { display: flex; flex-direction: column; gap: 5px; flex-shrink: 0; }
+  .cons-b { background: linear-gradient(180deg,#a86fe8,#7a45c0); border: none; border-radius: 9px; color: #fff; font-size: 11px; padding: 6px 9px; cursor: pointer; white-space: nowrap; }
+  .cons-b b { font-size: 12px; }
+  .cons-b.locked { opacity: 0.45; }
+  .cons-b:active { transform: scale(0.95); }
   .shop-sw { width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0; border: 2px solid rgba(255,255,255,0.25); }
   .shop-info { flex: 1; min-width: 0; }
   .shop-name { font-size: 12.5px; font-weight: 700; color: #eaf4ff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -407,6 +420,17 @@
   #powerups { position: absolute; top: 92px; left: 62px; display: flex; flex-direction: column; gap: 6px; }
   #powerups .pw { display: flex; align-items: center; gap: 6px; font-size: 20px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5)); }
   #powerups .pw i { display: block; width: 60px; height: 5px; background: linear-gradient(90deg, #9adcff, #4a9ad8); border-radius: 3px; }
+  #powerups .pw.pw-tug i { background: linear-gradient(90deg, #c79bff, #7a45c0); }
+  /* Кнопка-иконка активации тягача (расходник): тап по ходу забега. Справа снизу — под большой палец. */
+  /* Кнопка = кольцо-пуллер: фиолетовый бублик с ДЫРКОЙ по центру (radial-gradient), число в дырке. */
+  #tug-btn { position: absolute; right: 18px; bottom: 22px; width: 66px; height: 66px; border: none; border-radius: 50%;
+    background: radial-gradient(circle, transparent 30%, #c088f5 33%, #8a52d8 48%, #6b3fb0 58%, transparent 62%);
+    display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 8;
+    -webkit-tap-highlight-color: transparent; padding: 0; filter: drop-shadow(0 3px 10px rgba(140,70,220,0.6)); }
+  #tug-btn b { font-size: 15px; font-weight: 800; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,0.65); }
+  #tug-btn.on { animation: tugpulse 0.85s ease-in-out infinite; cursor: default; }
+  #tug-btn.off { opacity: 0.42; filter: grayscale(0.55) drop-shadow(0 3px 8px rgba(120,60,200,0.4)); }
+  @keyframes tugpulse { 0%,100% { filter: drop-shadow(0 3px 10px rgba(150,90,240,0.55)); } 50% { filter: drop-shadow(0 3px 18px rgba(190,130,255,0.95)); } }
 
   /* Попапы наград */
   #popups { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
@@ -727,6 +751,7 @@
         <div id="combo-bar"><div id="combo-fill"></div></div>
       </div>
       <div id="powerups"></div>
+      <button id="tug-btn" aria-label="Активировать пуллер" style="display:none"><b id="tug-n">0</b></button>
     </div>
     <div id="menu"></div>
     <div id="gameover"></div>

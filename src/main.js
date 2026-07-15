@@ -140,6 +140,24 @@ if (!new URLSearchParams(location.search).has('harness')) {
 // Кнопка паузы в HUD
 document.getElementById('pause-btn').addEventListener('click', () => game.togglePause());
 
+// Dev-грант для локального теста расходников: ?give на localhost выдаёт косточки+тягачи.
+// На проде (allgrit.github.io) не срабатывает — только localhost/127.*.
+if (/^(localhost|127\.)/.test(location.hostname) && params.has('give')) {
+  game.meta.data.cookies = Math.max(game.meta.data.cookies || 0, 9999);
+  if (!game.meta.data.consumables) game.meta.data.consumables = {};
+  game.meta.data.consumables.tug = 9;
+  game.meta.save();
+}
+
+// Кнопка активации расходника «Тягач» (тап по ходу забега)
+const tugBtn = document.getElementById('tug-btn');
+if (tugBtn) tugBtn.addEventListener('click', (e) => {
+  e.preventDefault();
+  if (!game.useTug()) { // нет в наличии / уже активен → в магазин
+    if (game.meta.consumableCount('tug') <= 0 && game.state !== 'running') game.ui.showShop && game.ui.showShop();
+  }
+});
+
 // Service Worker: офлайн + бесшовные апдейты (не в харнессе — детерминизм)
 if ('serviceWorker' in navigator && !new URLSearchParams(location.search).has('harness')) {
   const registerServiceWorker = () => {
@@ -180,6 +198,10 @@ const KEYMAP = {
 };
 window.addEventListener('keydown', (e) => {
   if (e.code === 'Escape' || e.code === 'KeyP') { e.preventDefault(); game.togglePause(); return; }
+  // Тягач: быстрая активация с клавиатуры (E / F / Shift) — дублирует HUD-кнопку
+  if (e.code === 'KeyE' || e.code === 'KeyF' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
+    e.preventDefault(); game.audio.init(); game.audio.resume(); game.useTug(); return;
+  }
   const a = KEYMAP[e.code];
   if (a) {
     e.preventDefault();
@@ -226,7 +248,7 @@ let running = true;
 
 // Оверлей производительности (?perf): реальный FPS/ms на устройстве. Presentation-only,
 // вне игрового цикла — детерминизм не затрагивается.
-const PERF = params.has('perf');
+const PERF = params.has('perf') || params.has('fps'); // ?perf=1 или ?fps=1 — оверлей fps/мс/geo/tex
 let perfEl = null, perfFrames = 0, perfWinStart = 0, perfRenderAcc = 0;
 if (PERF) {
   perfEl = document.createElement('div');
@@ -322,45 +344,68 @@ window.__harness = {
     renderFrame();
     return game.state;
   },
-  // Концепт расходника «Тягач-игрушка» (только визуал, харнесс-прототип #30): фрисби на «поводке»
-  // от пасти. phase: 'pull' — летит впереди и тянет; 'mouth' — поймана, в зубах. Ничего в игровой
-  // ветке не трогает — чистая презентация для показа концепта.
+  // Концепт расходника «Тягач-игрушка» (только визуал, харнесс-прототип #30): фиолетовый Puller
+  // (тонкое кольцо-torus) летит перед собакой как колесо → в зубы горизонтально; собака светится,
+  // спидлайны и молнии — «драйв». phase: 'pull' | 'mouth'. Ничего в игровой ветке не трогает.
   tugConcept(phase = 'pull', breed = 'border') {
     this.boot(42, breed);
     const dm = game.dogModel;
     const anchor = (dm && dm.parts && dm.parts.head) ? dm.parts.head : dm.root;
+    const root = dm.root;
     if (this._tug) { this._tug.parent && this._tug.parent.remove(this._tug); this._tug = null; }
+    if (this._tugFx) { this._tugFx.parent && this._tugFx.parent.remove(this._tugFx); this._tugFx = null; }
+    const PURPLE = 0x9b5de5;
+    // Спрайт из canvas-текстуры (аддитивный, для свечения/сердец/молний/спидлайнов)
+    const sprite = (draw, size = 128, blend = THREE.AdditiveBlending) => {
+      const cv = document.createElement('canvas'); cv.width = cv.height = size;
+      draw(cv.getContext('2d'), size);
+      const tex = new THREE.CanvasTexture(cv);
+      return new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, blending: blend }));
+    };
+    // --- Puller: фиолетовое кольцо у пасти / впереди (катится как колесо) ---
     const g = new THREE.Group();
-    const nose = new THREE.Vector3(0, -0.015, -0.195); // локаль головы
-    const toyPos = phase === 'mouth' ? new THREE.Vector3(0, -0.035, -0.265)
-                                     : new THREE.Vector3(0, 0.19, -0.7);
-    // фрисби-диск (сочный, с эмиссией под bloom)
-    const disc = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.145, 0.145, 0.032, 18),
-      new THREE.MeshStandardMaterial({ color: 0xff7a2f, roughness: 0.4, metalness: 0, flatShading: true, emissive: 0x5a1e00 }));
-    disc.rotation.x = phase === 'mouth' ? 1.5 : -0.9; // в зубах — ребром, в полёте — почти ребром вперёд (тянет)
-    disc.position.copy(toyPos);
-    g.add(disc);
-    // ободок диска
-    const rim = new THREE.Mesh(
-      new THREE.TorusGeometry(0.135, 0.022, 8, 20),
-      new THREE.MeshStandardMaterial({ color: 0xffd23f, roughness: 0.35, flatShading: true, emissive: 0x3a2800 }));
-    rim.rotation.x = disc.rotation.x + Math.PI / 2;
-    rim.position.copy(toyPos);
-    g.add(rim);
-    // поводок от носа к игрушке — только в фазе «тянет»
-    if (phase !== 'mouth') {
-      const dir = new THREE.Vector3().subVectors(toyPos, nose);
-      const len = dir.length();
-      const rope = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.011, 0.011, len, 6),
-        new THREE.MeshStandardMaterial({ color: 0xe23b3b, roughness: 0.7, flatShading: true }));
-      rope.position.copy(nose).add(toyPos).multiplyScalar(0.5);
-      rope.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
-      g.add(rope);
+    const toyPos = phase === 'mouth' ? new THREE.Vector3(0, -0.02, -0.28) : new THREE.Vector3(0, 0.15, -0.95);
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(phase === 'mouth' ? 0.115 : 0.155, phase === 'mouth' ? 0.024 : 0.03, 14, 34),
+      new THREE.MeshStandardMaterial({ color: PURPLE, roughness: 0.32, metalness: 0, flatShading: true, emissive: 0x40158f }));
+    ring.position.copy(toyPos);
+    if (phase === 'mouth') {
+      ring.rotation.x = Math.PI / 2;   // в зубах — ГОРИЗОНТАЛЬНО, собака держит кольцо поперёк (плашмя)
+    } else {
+      ring.rotation.y = Math.PI / 2;   // впереди — «колесо» катится вдоль движения
+      ring.rotation.z = 0.15;
     }
+    g.add(ring);
     anchor.add(g);
     this._tug = g;
+    // --- «драйв»-эффекты в системе root (вокруг собаки, мировые) ---
+    const fx = new THREE.Group();
+    // свечение собаки: большой мягкий фиолетовый ореол + точечный свет
+    const glow = sprite((ctx, s) => {
+      const gr = ctx.createRadialGradient(s / 2, s / 2, s * 0.12, s / 2, s / 2, s / 2); // полый центр — ореол, не заливка
+      gr.addColorStop(0, 'rgba(150,95,240,0)'); gr.addColorStop(0.5, 'rgba(175,120,255,0.32)'); gr.addColorStop(0.72, 'rgba(150,95,240,0.16)'); gr.addColorStop(1, 'rgba(150,95,240,0)');
+      ctx.fillStyle = gr; ctx.fillRect(0, 0, s, s);
+    });
+    glow.scale.set(2.0, 2.0, 1); glow.position.set(0, 0.42, 0.18); fx.add(glow); // чуть позади — гало, не забивает силуэт
+    const glowLight = new THREE.PointLight(0xb98cff, 4.5, 4.5, 2); glowLight.position.set(0, 0.7, 0.3); fx.add(glowLight);
+    // спид-лайны — тонкие аддитивные стрики позади (собака бежит в -Z, шлейф в +Z)
+    const streakDraw = (ctx, s) => { const gr = ctx.createLinearGradient(0, 0, s, 0); gr.addColorStop(0, 'rgba(255,255,255,0)'); gr.addColorStop(0.5, 'rgba(210,225,255,0.95)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); ctx.fillStyle = gr; ctx.fillRect(0, s * 0.42, s, s * 0.16); };
+    const LANES = [[-0.5, 0.15], [0.5, 0.2], [-0.28, 0.42], [0.3, 0.38], [0, 0.55]];
+    for (let i = 0; i < LANES.length; i++) {
+      const sl = sprite(streakDraw);
+      sl.scale.set(1.9, 0.035, 1);
+      sl.position.set(LANES[i][0], LANES[i][1], 0.7 + i * 0.3); // явно позади, разбег по глубине шлейфа
+      fx.add(sl);
+    }
+    // молнии (жёлтые зигзаги) — драйв/энергия
+    const boltDraw = (ctx, s) => {
+      ctx.strokeStyle = '#ffe23a'; ctx.lineWidth = s * 0.11; ctx.lineJoin = 'round'; ctx.shadowColor = '#fff2a0'; ctx.shadowBlur = s * 0.1;
+      ctx.beginPath(); ctx.moveTo(s * 0.6, s * 0.1); ctx.lineTo(s * 0.38, s * 0.5); ctx.lineTo(s * 0.55, s * 0.52); ctx.lineTo(s * 0.34, s * 0.9); ctx.stroke();
+    };
+    const BOLTS = [[-0.62, 0.55, 0.0], [0.6, 0.8, -0.1], [0.15, 1.15, 0.25]];
+    for (const [x, y, z] of BOLTS) { const b = sprite(boltDraw); b.scale.setScalar(0.22); b.position.set(x, y, z); fx.add(b); }
+    root.add(fx);
+    this._tugFx = fx;
     game.update(); game.update(); // пара кадров для живой позы галопа
     applyCloseup();
     renderFrame();
@@ -464,3 +509,16 @@ window.__harness = {
   menu() { game.showMenu(); renderFrame(); },
   render() { applyCloseup(); renderFrame(); },
 };
+
+// Живой предпросмотр концепта «Тягача» (dev, только в ворктри):
+//   ?harness=1&tug=pull   — Puller летит впереди
+//   ?harness=1&tug=mouth  — Puller в зубах (горизонтально)
+//   доп: &view=three|side|back|front  &breed=border|aussie|poodle
+if (HARNESS && params.get('tug')) {
+  const show = () => {
+    if (!game.dogModel) return void setTimeout(show, 150);
+    window.__harness.setCloseup(params.get('view') || 'three', 2.1);
+    window.__harness.tugConcept(params.get('tug'), params.get('breed') || 'border');
+  };
+  setTimeout(show, 450);
+}

@@ -1,4 +1,4 @@
-import { DOG_SHOP, TITLES, plural, WEEK_REWARDS } from './meta.js';
+import { DOG_SHOP, TITLES, plural, WEEK_REWARDS, CONSUMABLES } from './meta.js';
 import { fetchTop, submitScore } from './leaderboard.js';
 import { track } from './analytics.js';
 import { APP_VERSION } from './version.js';
@@ -8,6 +8,8 @@ import { ACH_SECTIONS, ACH_REWARDS, fmtVal } from './achievements.js';
 // Весь HUD и меню — DOM поверх канваса: чётче текст, дешевле анимации (CSS).
 
 const PW_KEYS = ['magnet', 'shield', 'rocket', 'multi']; // порядок пауэрапов в HUD (как в powerups)
+// Таймеры бустов в HUD (слева вверху): пауэрапы + тягач + буст стола. Показываем только активные.
+const BOOST_KEYS = ['magnet', 'shield', 'rocket', 'multi', 'tug', 'table'];
 
 // Цветная SVG-розетка (эмодзи 🏵 в headless/тёмной теме читается плохо)
 function rosetteSVG(color = '#f0c531', size = 34) {
@@ -539,14 +541,41 @@ export class UI {
         </div>`;
       };
       const coats = cat.filter(i => i.slot === 'coat'), necks = cat.filter(i => i.slot === 'neck');
+      // Расходники: карточка на каждый CONSUMABLE с покупкой ×1/×5 (пачка со скидкой).
+      const consHtml = Object.entries(CONSUMABLES).map(([key, c]) => {
+        const own = this.meta.consumableCount(key);
+        const b1 = bal >= c.price, b5 = bal >= c.pack5;
+        return `<div class="cons-item">
+          <div class="cons-ic">${c.emoji}</div>
+          <div class="cons-info"><div class="shop-name">${this._esc(c.name)} <span class="cons-own">×${own}</span></div>
+            <div class="cons-desc">${this._esc(c.desc)}</div></div>
+          <div class="cons-buy">
+            <button class="cons-b ${b1 ? '' : 'locked'}" data-cons="${key}" data-qty="1">×1 · <b>${c.price} 🦴</b></button>
+            <button class="cons-b ${b5 ? '' : 'locked'}" data-cons="${key}" data-qty="5">×5 · <b>${c.pack5} 🦴</b></button>
+          </div>
+        </div>`;
+      }).join('');
       el.innerHTML = `<div class="shop-card">
         <div class="shop-head"><span class="shop-title">🛍 Магазин</span><span class="shop-bal">🦴 ${bal.toLocaleString('ru')}</span></div>
         <div class="shop-body">
+          <div class="shop-sec">🎒 Расходники</div><div class="shop-cons">${consHtml}</div>
           <div class="shop-sec">🎨 Окрасы</div><div class="shop-grid">${coats.map(itemHtml).join('')}</div>
           <div class="shop-sec">🧣 Банданы</div><div class="shop-grid">${necks.map(itemHtml).join('')}</div>
         </div>
         <button class="menu-btn shop-close" id="shop-close">Закрыть</button>
       </div>`;
+      for (const btn of el.querySelectorAll('.cons-b')) {
+        btn.addEventListener('click', () => {
+          const qty = +btn.dataset.qty;
+          if (this.meta.buyConsumable(btn.dataset.cons, qty)) {
+            track('consumable_buy', { item: btn.dataset.cons, qty });
+            if (onChange) onChange();
+            render();
+          } else {
+            btn.animate([{ transform: 'translateX(-4px)' }, { transform: 'translateX(4px)' }, { transform: 'translateX(0)' }], { duration: 180 });
+          }
+        });
+      }
       for (const node of el.querySelectorAll('.shop-item')) {
         node.addEventListener('click', () => {
           const { slot, id } = node.dataset;
@@ -768,19 +797,38 @@ export class UI {
     // без пересборки innerHTML каждый кадр.
     if (!this._pwNodes) {
       this._pwNodes = {};
-      const icons = { magnet: '🧲', shield: '🛡', rocket: '🥏', multi: '✨' };
-      for (const k of PW_KEYS) {
-        const div = document.createElement('div'); div.className = 'pw'; div.style.display = 'none';
+      const icons = { magnet: '🧲', shield: '🛡', rocket: '🥏', multi: '✨', tug: '🟣', table: '⚡' };
+      for (const k of BOOST_KEYS) {
+        const div = document.createElement('div'); div.className = 'pw' + (k === 'tug' ? ' pw-tug' : ''); div.style.display = 'none';
         div.innerHTML = `<span>${icons[k]}</span><i></i>`;
         this._pwNodes[k] = { div, bar: div.querySelector('i'), shown: false };
         this.powerupsEl.appendChild(div);
       }
     }
-    for (const k of PW_KEYS) {
-      const v = state.powerups[k], node = this._pwNodes[k];
+    // Значения бустов: пауэрапы из powerups[], тягач/стол — из своих таймеров.
+    const bv = (k) => k === 'tug' ? [state.tugT || 0, state.tugMax || 1]
+      : k === 'table' ? [state.tableBoostT || 0, state.tableBoostMax || 1]
+        : [state.powerups[k], state.powerupMax[k]];
+    for (const k of BOOST_KEYS) {
+      const [v, max] = bv(k), node = this._pwNodes[k];
       const show = v > 0;
       if (show !== node.shown) { node.shown = show; node.div.style.display = show ? '' : 'none'; }
-      if (show) node.bar.style.width = Math.min(100, v / state.powerupMax[k] * 100) + '%';
+      if (show) node.bar.style.width = Math.min(100, v / max * 100) + '%';
+    }
+    // Кнопка активации тягача: показываем когда есть в наличии ИЛИ активен; класс on (активен)/off (нет заряда).
+    const tugBtn = this._tugBtn || (this._tugBtn = document.getElementById('tug-btn'));
+    if (tugBtn) {
+      const cnt = state.tugCount || 0, active = (state.tugT || 0) > 0;
+      const vis = cnt > 0 || active;
+      if (vis !== h.tugVis) { h.tugVis = vis; tugBtn.style.display = vis ? 'flex' : 'none'; }
+      if (vis) {
+        // Активен — показываем ОТСЧЁТ секунд; иначе — количество зарядов.
+        const label = active ? Math.ceil(state.tugT || 0) + 'с' : String(cnt);
+        if (label !== h.tugLbl) { h.tugLbl = label; tugBtn.querySelector('b').textContent = label; }
+        if (active !== h.tugOn) { h.tugOn = active; tugBtn.classList.toggle('on', active); }
+        const off = cnt <= 0 && !active;
+        if (off !== h.tugOff) { h.tugOff = off; tugBtn.classList.toggle('off', off); }
+      }
     }
     // Виньетка/спидлайны — диффим
     const dOp = state.danger ? 0.5 : 0;

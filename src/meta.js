@@ -14,6 +14,13 @@ export const DOG_SHOP = [
   { key: 'poodle', name: 'Той-пудель', cost: 2000, perk: 'Меньше хитбокс' },
 ];
 
+// Расходники «на забег» (тратятся). Цена ~1 медианный забег (аналитика: медиана 120🦴/забег),
+// пачка ×5 со скидкой ~15%. secs — длительность эффекта. Активация по ходу (иконка на HUD).
+export const CONSUMABLES = {
+  tug: { name: 'Пуллер', emoji: '🟣', price: 150, pack5: 640, secs: 22,
+    desc: 'Кольцо-игрушка тянет вперёд: защита от краша + буст + магнит на косточки' },
+};
+
 // 20 разнообразных титулов — путь от новичка до бессмертной легенды аджилити. После
 // последнего звания рост продолжается звёздами (см. title()), чтобы топам было куда расти.
 // Счёт v2 (F4): титул отражает МАСТЕРСТВО — привязан к bestScore (лучший забег), а не к
@@ -141,6 +148,7 @@ export class Meta {
       scoreV: 2,          // версия шкалы счёта (сезон 2)
       seenSeason2: false, // разовый диалог о старте Сезона 2
       seenS2Warn: false,  // разовое предупреждение «завтра сброс» (до старта)
+      consumables: { tug: 0 }, // расходники «на забег» (тратятся): тягач-игрушка
     };
   }
 
@@ -194,6 +202,8 @@ export class Meta {
     if (!d.achCounters) d.achCounters = {};
     if (!d.achClaimed) d.achClaimed = {};
     if (!d.week) d.week = { streak: 0, lastDay: null, claimedDay: null, freezeWeek: null };
+    if (!d.consumables || typeof d.consumables !== 'object') d.consumables = { tug: 0 };
+    if (d.consumables.tug == null) d.consumables.tug = 0;
     return d;
   }
 
@@ -221,6 +231,31 @@ export class Meta {
   }
 
   cosmeticEquip() { return { ...this.data.cosmeticsEquip }; }
+
+  // ---------- Расходники (тратятся за забег) ----------
+  consumableCount(key) { return (this.data.consumables && this.data.consumables[key]) || 0; }
+
+  // Покупка пачкой: qty=1 — по цене price, qty=5 — по цене pack5 (со скидкой).
+  buyConsumable(key, qty = 1) {
+    const c = CONSUMABLES[key];
+    if (!c) return false;
+    const cost = qty === 5 ? c.pack5 : c.price * qty;
+    if ((this.data.cookies || 0) < cost) return false;
+    this.data.cookies -= cost;
+    if (!this.data.consumables) this.data.consumables = {};
+    this.data.consumables[key] = (this.data.consumables[key] || 0) + qty;
+    this.data.achCounters.spent = (this.data.achCounters.spent || 0) + cost;
+    this.save();
+    return true;
+  }
+
+  // Списать 1 при активации в забеге; false если нет в наличии.
+  useConsumable(key) {
+    if (this.consumableCount(key) <= 0) return false;
+    this.data.consumables[key]--;
+    this.save();
+    return true;
+  }
 
   title() {
     // F4: титул — от лучшего забега (мастерство), а не от накопленного totalScore («стажа»)
