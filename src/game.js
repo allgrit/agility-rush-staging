@@ -594,6 +594,7 @@ export class Game {
     hs.boost = this.boostT > 0 || this.flyT > 0 || this.tableBoostT > 0 || this.tugT > 0;
     // Таймеры бустов на HUD (слева вверху): тягач + tableBoost к пауэрапам. tugCount — для иконки-активации.
     hs.tugT = this.tugT; hs.tugMax = TUG_SECS; hs.tugCount = this.meta.consumableCount('tug');
+    hs.tugHint = hs.tugCount > 0 && this.tugT <= 0 && !this.meta.data.tugUsed; // новичок: купил, не жал → подсказка
     hs.tableBoostT = this.tableBoostT; hs.tableBoostMax = 10;
     // Juice (#27): speed-lines растут с реальной скоростью (0 до 18 м/с → максимум к 26),
     // не только при бусте. Чисто презентационная величина.
@@ -1562,6 +1563,7 @@ export class Game {
     if (!this.meta.useConsumable('tug')) return false;           // нет в наличии
     this.tugT = TUG_SECS;
     this._tugJustOn = true;
+    if (!this.meta.data.tugUsed) { this.meta.data.tugUsed = true; this.meta.save(); } // гасим подсказку «тап сюда»
     this.audio.boost();
     this.popups.custom('ПУЛЛЕР!', 'perfect', 50, 40);
     return true;

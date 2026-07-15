@@ -800,8 +800,8 @@ export class UI {
       const icons = { magnet: '🧲', shield: '🛡', rocket: '🥏', multi: '✨', tug: '🟣', table: '⚡' };
       for (const k of BOOST_KEYS) {
         const div = document.createElement('div'); div.className = 'pw' + (k === 'tug' ? ' pw-tug' : ''); div.style.display = 'none';
-        div.innerHTML = `<span>${icons[k]}</span><i></i>`;
-        this._pwNodes[k] = { div, bar: div.querySelector('i'), shown: false };
+        div.innerHTML = `<span>${icons[k]}</span><i></i><em></em>`;
+        this._pwNodes[k] = { div, bar: div.querySelector('i'), sec: div.querySelector('em'), shown: false, secTxt: '' };
         this.powerupsEl.appendChild(div);
       }
     }
@@ -813,14 +813,19 @@ export class UI {
       const [v, max] = bv(k), node = this._pwNodes[k];
       const show = v > 0;
       if (show !== node.shown) { node.shown = show; node.div.style.display = show ? '' : 'none'; }
-      if (show) node.bar.style.width = Math.min(100, v / max * 100) + '%';
+      if (show) {
+        node.bar.style.width = Math.min(100, v / max * 100) + '%';
+        const secTxt = max > 1.5 ? Math.ceil(v) + 'с' : ''; // отсчёт секунд рядом с иконкой (щит — мгновенный)
+        if (secTxt !== node.secTxt) { node.secTxt = secTxt; node.sec.textContent = secTxt; }
+      }
     }
     // Кнопка активации тягача: показываем когда есть в наличии ИЛИ активен; класс on (активен)/off (нет заряда).
+    const tugBox = this._tugBox || (this._tugBox = document.getElementById('tug-box'));
     const tugBtn = this._tugBtn || (this._tugBtn = document.getElementById('tug-btn'));
-    if (tugBtn) {
+    if (tugBox && tugBtn) {
       const cnt = state.tugCount || 0, active = (state.tugT || 0) > 0;
       const vis = cnt > 0 || active;
-      if (vis !== h.tugVis) { h.tugVis = vis; tugBtn.style.display = vis ? 'flex' : 'none'; }
+      if (vis !== h.tugVis) { h.tugVis = vis; tugBox.style.display = vis ? 'flex' : 'none'; }
       if (vis) {
         // Активен — показываем ОТСЧЁТ секунд; иначе — количество зарядов.
         const label = active ? Math.ceil(state.tugT || 0) + 'с' : String(cnt);
@@ -828,6 +833,9 @@ export class UI {
         if (active !== h.tugOn) { h.tugOn = active; tugBtn.classList.toggle('on', active); }
         const off = cnt <= 0 && !active;
         if (off !== h.tugOff) { h.tugOff = off; tugBtn.classList.toggle('off', off); }
+        // Подсказка новичку: купил, ни разу не активировал → «тап сюда» (палец + кольцо).
+        const hint = !!state.tugHint && !active;
+        if (hint !== h.tugHint) { h.tugHint = hint; tugBox.classList.toggle('hint', hint); }
       }
     }
     // Виньетка/спидлайны — диффим

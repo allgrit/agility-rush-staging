@@ -149,6 +149,7 @@ export class Meta {
       seenSeason2: false, // разовый диалог о старте Сезона 2
       seenS2Warn: false,  // разовое предупреждение «завтра сброс» (до старта)
       consumables: { tug: 0 }, // расходники «на забег» (тратятся): тягач-игрушка
+      tugUsed: false, // хоть раз активировал пуллер (гасит подсказку «тап сюда»)
     };
   }
 
@@ -204,6 +205,7 @@ export class Meta {
     if (!d.week) d.week = { streak: 0, lastDay: null, claimedDay: null, freezeWeek: null };
     if (!d.consumables || typeof d.consumables !== 'object') d.consumables = { tug: 0 };
     if (d.consumables.tug == null) d.consumables.tug = 0;
+    if (d.tugUsed == null) d.tugUsed = false;
     return d;
   }
 

@@ -8,8 +8,8 @@
   // Bootstrap-версия: index.html грузится всегда свежим (network-first / без SW),
   // поэтому знает актуальную сборку. Если у игрока в кэше старьё — один раз чистим
   // все кэши, разрегистрируем старый SW и перезагружаемся. Разрывает «залипание» SW.
-  window.__BUILD = 'staging-v38-puller';
-  window.__CACHE = 'agility-staging-v38'; // должно совпадать с VERSION в sw.js
+  window.__BUILD = 'staging-v39-puller';
+  window.__CACHE = 'agility-staging-v39'; // должно совпадать с VERSION в sw.js
   (function () {
     try {
       var qs = new URLSearchParams(location.search);
@@ -421,16 +421,27 @@
   #powerups .pw { display: flex; align-items: center; gap: 6px; font-size: 20px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5)); }
   #powerups .pw i { display: block; width: 60px; height: 5px; background: linear-gradient(90deg, #9adcff, #4a9ad8); border-radius: 3px; }
   #powerups .pw.pw-tug i { background: linear-gradient(90deg, #c79bff, #7a45c0); }
+  /* Отсчёт секунд рядом с иконкой эффекта (кроме мгновенного щита) */
+  #powerups .pw em { font-style: normal; font-size: 13px; font-weight: 800; color: #eaf2ff; min-width: 22px; text-shadow: 0 1px 3px rgba(0,0,0,0.6); }
   /* Кнопка-иконка активации тягача (расходник): тап по ходу забега. Справа снизу — под большой палец. */
   /* Кнопка = кольцо-пуллер: фиолетовый бублик с ДЫРКОЙ по центру (radial-gradient), число в дырке. */
-  #tug-btn { position: absolute; right: 18px; bottom: 22px; width: 66px; height: 66px; border: none; border-radius: 50%;
+  /* Бокс кнопки-пуллера: кольцо + подпись + подсказка-тап для новичка. Справа снизу. */
+  #tug-box { position: absolute; right: 16px; bottom: 16px; z-index: 8; display: flex; flex-direction: column; align-items: center; gap: 3px; pointer-events: none; }
+  #tug-btn { position: relative; width: 66px; height: 66px; border: none; border-radius: 50%; pointer-events: auto;
     background: radial-gradient(circle, transparent 30%, #c088f5 33%, #8a52d8 48%, #6b3fb0 58%, transparent 62%);
-    display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 8;
+    display: flex; align-items: center; justify-content: center; cursor: pointer;
     -webkit-tap-highlight-color: transparent; padding: 0; filter: drop-shadow(0 3px 10px rgba(140,70,220,0.6)); }
   #tug-btn b { font-size: 15px; font-weight: 800; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,0.65); }
   #tug-btn.on { animation: tugpulse 0.85s ease-in-out infinite; cursor: default; }
   #tug-btn.off { opacity: 0.42; filter: grayscale(0.55) drop-shadow(0 3px 8px rgba(120,60,200,0.4)); }
+  #tug-cap { font-size: 11px; font-weight: 700; color: #d9c6f5; text-shadow: 0 1px 3px rgba(0,0,0,0.75); letter-spacing: 0.3px; }
   @keyframes tugpulse { 0%,100% { filter: drop-shadow(0 3px 10px rgba(150,90,240,0.55)); } 50% { filter: drop-shadow(0 3px 18px rgba(190,130,255,0.95)); } }
+  /* Подсказка новичку («тап сюда»): палец над кнопкой + пульсирующее кольцо */
+  #tug-hint { position: absolute; left: 50%; top: -10px; transform: translateX(-50%); font-size: 27px; display: none; z-index: 9; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.55)); }
+  #tug-box.hint #tug-hint { display: block; animation: tugtap 1s ease-in-out infinite; }
+  #tug-box.hint #tug-btn::after { content: ''; position: absolute; inset: -6px; border-radius: 50%; border: 3px solid #ffd587; animation: tugring 1.2s ease-out infinite; }
+  @keyframes tugtap { 0%,100% { transform: translateX(-50%) translateY(0) scale(1); } 45% { transform: translateX(-50%) translateY(15px) scale(0.8); } }
+  @keyframes tugring { 0% { transform: scale(0.8); opacity: 0.85; } 100% { transform: scale(1.55); opacity: 0; } }
 
   /* Попапы наград */
   #popups { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
@@ -751,7 +762,11 @@
         <div id="combo-bar"><div id="combo-fill"></div></div>
       </div>
       <div id="powerups"></div>
-      <button id="tug-btn" aria-label="Активировать пуллер" style="display:none"><b id="tug-n">0</b></button>
+      <div id="tug-box" style="display:none">
+        <div id="tug-hint">👆</div>
+        <button id="tug-btn" aria-label="Активировать пуллер"><b id="tug-n">0</b></button>
+        <span id="tug-cap">Пуллер</span>
+      </div>
     </div>
     <div id="menu"></div>
     <div id="gameover"></div>
