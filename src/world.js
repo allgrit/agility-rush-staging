@@ -437,17 +437,19 @@ export class World {
     // Дистанции/периоды скорректированы по сцен-эвалу (судьи: «пропы слишком далеко
     // и мелко с игровой камеры») — ближе к кербу и чаще; читаемость охраняет xOff≥1.6
     // за кербом + правило «декор не пересекает керб».
+    // Масштабы подняты по фидбеку («маленькие, незаметные»): пропы — заметные объекты
+    // среднего плана, а не миниатюры. Скамейка/будка ориентируются ЛИЦОМ к трассе.
     const defs = [
-      { name: 'agility-sign',  h: 2.3, period: 130, xOff: 1.8, zones: null },
-      { name: 'flag-cluster',  h: 2.6, period: 105, xOff: 2.2, zones: null },
-      { name: 'water-station', h: 1.0, period: 145, xOff: 1.6, zones: null },
-      { name: 'score-board',   h: 1.9, period: 180, xOff: 2.4, zones: ['stadium', 'park'] },
-      { name: 'judge-booth',   h: 2.4, period: 220, xOff: 3.0, zones: ['stadium', 'night'] },
-      { name: 'camera-tower',  h: 3.4, period: 280, xOff: 3.4, zones: ['stadium', 'night'] },
-      { name: 'food-cart',     h: 2.0, period: 205, xOff: 3.2, zones: ['park', 'sunset'] },
-      { name: 'park-bench',    h: 0.9, period: 110, xOff: 1.7, zones: ['park', 'sunset'] },
-      { name: 'dog-statue',    h: 1.7, period: 360, xOff: 2.2, zones: null },
-      { name: 'podium',        h: 1.0, period: 450, xOff: 2.6, zones: null },
+      { name: 'agility-sign',  h: 3.1, period: 130, xOff: 1.8, zones: null },
+      { name: 'flag-cluster',  h: 3.5, period: 105, xOff: 2.2, zones: null },
+      { name: 'water-station', h: 1.35, period: 145, xOff: 1.6, zones: null },
+      { name: 'score-board',   h: 2.6, period: 180, xOff: 2.4, zones: ['stadium', 'park'] },
+      { name: 'judge-booth',   h: 3.2, period: 220, xOff: 3.0, zones: ['stadium', 'night'] },
+      { name: 'camera-tower',  h: 4.6, period: 280, xOff: 3.4, zones: ['stadium', 'night'] },
+      { name: 'food-cart',     h: 2.7, period: 205, xOff: 3.2, zones: ['park', 'sunset'] },
+      { name: 'park-bench',    h: 1.15, period: 110, xOff: 1.7, zones: ['park', 'sunset'] },
+      { name: 'dog-statue',    h: 2.4, period: 360, xOff: 2.2, zones: null },
+      { name: 'podium',        h: 1.4, period: 450, xOff: 2.6, zones: null },
     ];
     this.genProps = [];
     this._genPropM = new THREE.Matrix4();
@@ -492,7 +494,9 @@ export class World {
       p.root.visible = rel > -30 && rel < 170;
       if (!p.root.visible) continue;
       p.root.position.set(side * (TRACK_HALF + p.def.xOff + h * 1.4), p.yBase, z);
-      p.root.rotation.y = side > 0 ? -0.35 - h * 0.5 : 0.35 + h * 0.5; // развёрнут к трассе
+      // Фронт GLB смотрит в +Z (front-вид развёртки). Разворачиваем лицом К ТРАССЕ:
+      // справа (side=1) — фронт в −X (rotY −π/2), слева — в +X (rotY +π/2), ±вариация.
+      p.root.rotation.y = side * -(Math.PI / 2) + (h - 0.5) * 0.4;
     }
   }
 
