@@ -420,6 +420,80 @@ export class World {
     }
 
     this._buildSideProps();
+    this._buildGenProps();
+  }
+
+  // ============ Сгенерированные GLB-пропы (Tripo-конвейер, приняты VLM-судьёй) ============
+  // Асинхронная загрузка ПОСЛЕ старта (не в критическом пути); каждый проп — 1 меш =
+  // 1 draw call на клон. Слоты детерминированы hash-ом (без rng), recycle по дистанции.
+  // Плотность: ?props=off|light|rich (по умолчанию medium) — для сцен-эвала и слабых устройств.
+  _buildGenProps() {
+    const q = (typeof location !== 'undefined') ? new URLSearchParams(location.search) : new URLSearchParams();
+    const density = q.get('props') || 'medium';
+    if (density === 'off') { this.genProps = []; return; }
+    const D = density === 'light' ? 1.6 : density === 'rich' ? 0.62 : 1; // множитель периода
+    // Манифест: h — целевая высота (м), period — метров между экземплярами типа,
+    // xOff — отступ за керб, zones — где виден (null = все зоны)
+    // Дистанции/периоды скорректированы по сцен-эвалу (судьи: «пропы слишком далеко
+    // и мелко с игровой камеры») — ближе к кербу и чаще; читаемость охраняет xOff≥1.6
+    // за кербом + правило «декор не пересекает керб».
+    const defs = [
+      { name: 'agility-sign',  h: 2.3, period: 130, xOff: 1.8, zones: null },
+      { name: 'flag-cluster',  h: 2.6, period: 105, xOff: 2.2, zones: null },
+      { name: 'water-station', h: 1.0, period: 145, xOff: 1.6, zones: null },
+      { name: 'score-board',   h: 1.9, period: 180, xOff: 2.4, zones: ['stadium', 'park'] },
+      { name: 'judge-booth',   h: 2.4, period: 220, xOff: 3.0, zones: ['stadium', 'night'] },
+      { name: 'camera-tower',  h: 3.4, period: 280, xOff: 3.4, zones: ['stadium', 'night'] },
+      { name: 'food-cart',     h: 2.0, period: 205, xOff: 3.2, zones: ['park', 'sunset'] },
+      { name: 'park-bench',    h: 0.9, period: 110, xOff: 1.7, zones: ['park', 'sunset'] },
+      { name: 'dog-statue',    h: 1.7, period: 360, xOff: 2.2, zones: null },
+      { name: 'podium',        h: 1.0, period: 450, xOff: 2.6, zones: null },
+    ];
+    this.genProps = [];
+    this._genPropM = new THREE.Matrix4();
+    import('three/addons/loaders/GLTFLoader.js').then(({ GLTFLoader }) => {
+      const loader = new GLTFLoader();
+      defs.forEach((def, di) => {
+        loader.load(`./assets/gen/${def.name}.glb`, (gltf) => {
+          const proto = gltf.scene;
+          // Нормировка: масштаб к целевой высоте, опора на y=0
+          const box = new THREE.Box3().setFromObject(proto);
+          const size = box.getSize(new THREE.Vector3());
+          const k = def.h / Math.max(0.01, size.y);
+          // 2 клона на тип — рециклируются вперёд по слотам
+          for (let c = 0; c < 2; c++) {
+            const inst = proto.clone(true);
+            inst.scale.setScalar(k);
+            inst.visible = false;
+            this.scene.add(inst);
+            this.genProps.push({ def, di, c, root: inst, yBase: -box.min.y * k });
+          }
+        }, undefined, () => { /* файл недоступен — проп просто не появится */ });
+      });
+      this._genPropsPeriodMul = D;
+    });
+  }
+
+  _updateGenProps(dogZ, dist) {
+    if (!this.genProps || !this.genProps.length) return;
+    const D = this._genPropsPeriodMul || 1;
+    const zone = this.currentZone;
+    for (const p of this.genProps) {
+      const period = p.def.period * D;
+      // Слот c-того клона: чередуем вперёд (клон 0 — ближний слот, клон 1 — следующий)
+      const slot = Math.floor(dist / period) + p.c;
+      const h = this._slotHash(slot * 13 + p.di * 101);
+      const side = h > 0.5 ? 1 : -1;
+      const zoneOk = !p.def.zones || p.def.zones.includes(zone);
+      if (!zoneOk) { p.root.visible = false; continue; }
+      const z = dogZ - (slot * period + h * period * 0.5 - dist);
+      // Показываем только впереди в разумном окне (за туманом всё равно не видно)
+      const rel = dogZ - z;
+      p.root.visible = rel > -30 && rel < 170;
+      if (!p.root.visible) continue;
+      p.root.position.set(side * (TRACK_HALF + p.def.xOff + h * 1.4), p.yBase, z);
+      p.root.rotation.y = side > 0 ? -0.35 - h * 0.5 : 0.35 + h * 0.5; // развёрнут к трассе
+    }
   }
 
   // Juice (#27, F5): уплотнение среднего плана — recycle-пул боковых пропов
@@ -453,8 +527,10 @@ export class World {
       flagGeo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
     }
     const FLAGS = 40, POSTS = 14;
+    // Белый флаг (был красный): UX-судья — тонкие красные вертикали у кромки путаются
+    // со стойками слалома; декор держим в нейтральной палитре
     this.sideFlags = new THREE.InstancedMesh(flagGeo,
-      new THREE.MeshLambertMaterial({ color: 0xd8434e, flatShading: true }), FLAGS);
+      new THREE.MeshLambertMaterial({ color: 0xf2eee2, flatShading: true }), FLAGS);
     // Высокий столб-мачта: проносится мимо камеры через верх кадра (главный speed-cue).
     // Тон приглушён относительно белых стоек снарядов (UX: не спорить с ними в дальней зоне).
     const postGeo = new THREE.BoxGeometry(0.16, 4.6, 0.16);
@@ -535,7 +611,9 @@ export class World {
     grad.addColorStop(1, '#525c6e');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, 512, 128);
-    const palette = ['#c96b6b', '#6b9bc9', '#c9b46b', '#8fc96b', '#b48fc9', '#c9906b', '#d8d8d8', '#6bc9bc'];
+    // Палитра приглушена ~25% (сцен-эвал, все роли: пёстрая толпа = высокочастотный шум,
+    // спорящий с читаемостью снарядов) — тона ближе к серому, яркость ниже
+    const palette = ['#a86e6e', '#6e8aa8', '#a89a6e', '#84a86e', '#9a84a8', '#a8846e', '#b4b4b4', '#6ea89e'];
     let k = 0;
     for (let row = 0; row < 6; row++) {
       for (let col = 0; col < 42; col++) {
@@ -943,6 +1021,7 @@ export class World {
     this.time += dt;
     if (this.cheerT > 0) this.cheerT -= dt;
     this._updateSideProps(dogZ, dist);
+    this._updateGenProps(dogZ, dist);
     // Поперечные полосы проявляются с разгоном: 0 до 8 м/с → 0.34 к 22 м/с
     if (this.crossMat) this.crossMat.opacity = 0.34 * Math.max(0, Math.min(1, (speed - 8) / 14));
     // Плавный переход зон в последние 12% зоны
