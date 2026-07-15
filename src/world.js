@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { bakeColored, mergeColored, bakeStatic } from './bake.js';
 
 // Окружение: небо, свет, зоны (стадион/парк/закат/ночь), покрытие трассы,
 // трибуны с «живой» толпой, боковой декор. Всё рециклится по мере бега (собака бежит в -Z).
@@ -12,6 +14,7 @@ const ZONES = [
   { name: 'sunset', sky: 0x5f6bb4, horizon: 0xff9d5e, sun: 0xff8f3d, sunInt: 2.7, amb: 0xa06a80, ambInt: 0.6, fog: 0xe8a878, grass: 0x6e7a38, trackA: 0x5a8a3e, trackB: 0x44682f, rim: 0.95, expo: 0.98, cloud: 0xffc8a0, cloudOp: 0.6, hill: 0x6b5a80 },
   { name: 'night', sky: 0x101a35, horizon: 0x2c3f66, sun: 0x9fc0f0, sunInt: 1.3, amb: 0x3d4f78, ambInt: 0.75, fog: 0x1e2f4e, grass: 0x3d4a2a, trackA: 0x336336, trackB: 0x254a29, rim: 1.5, expo: 0.88, cloud: 0x2e3d5e, cloudOp: 0.35, hill: 0x1c2b45 },
 ];
+const _piQ = new THREE.Quaternion(), _piS = new THREE.Vector3(), _piE = new THREE.Euler(), _piV = new THREE.Vector3();
 const ZONE_LEN = 260; // метров на зону — смена света видна уже в коротком забеге
 
 // Scratch-цвета для _applyZone: переиспользуются каждый кадр вместо new THREE.Color (без GC-мусора)
@@ -135,16 +138,19 @@ export class World {
       const ctx = cv.getContext('2d');
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, 128, 128);
-      // Короткие штрихи-травинки разной яркости
+      // Короткие штрихи-травинки разной яркости. Шум детерминированный (LCG):
+      // одинаковая текстура между запусками — иначе пиксель-дифф кадров невозможен
+      let _ls = 12345;
+      const rnd = () => { _ls = (_ls * 1664525 + 1013904223) >>> 0; return _ls / 4294967296; };
       for (let i = 0; i < 900; i++) {
-        const x = Math.random() * 128, y = Math.random() * 128;
-        const l = 2 + Math.random() * 4;
-        const b = 200 + Math.floor(Math.random() * 70) - 35;
+        const x = rnd() * 128, y = rnd() * 128;
+        const l = 2 + rnd() * 4;
+        const b = 200 + Math.floor(rnd() * 70) - 35;
         ctx.strokeStyle = `rgb(${b},${b + 12},${b})`;
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(x, y);
-        ctx.lineTo(x + (Math.random() - 0.5) * 1.5, y + l);
+        ctx.lineTo(x + (rnd() - 0.5) * 1.5, y + l);
         ctx.stroke();
       }
       const tex = new THREE.CanvasTexture(cv);
@@ -158,6 +164,25 @@ export class World {
     this.grassMat = new THREE.MeshStandardMaterial({ color: 0x69b04b, roughness: 1, flatShading: true, vertexColors: true });
     const lineMat = new THREE.MeshStandardMaterial({ color: 0xf5f0e6, roughness: 0.9 });
     const SEG = 30, COUNT = 8;
+    // Мерж статичного декора сегмента: каждый экземпляр запекается матрицей в
+    // геометрию с vertex colors → 1 меш вместо 6 InstancedMesh + 3 Mesh на сегмент.
+    // Нормали: у flat-частей фейсовые (toNonIndexed+compute на неиндексированной),
+    // у гладких (стебли) — родные; материал без flatShading даёт тот же вид.
+    const bakePart = (geo, mtx, hex, faceted) => {
+      // всегда non-indexed: mergeGeometries не смешивает indexed/non-indexed (вернёт null)
+      let g = geo.index ? geo.toNonIndexed() : geo.clone();
+      if (mtx) g.applyMatrix4(mtx);
+      if (faceted) g.computeVertexNormals();
+      const c = new THREE.Color(hex);
+      const n = g.attributes.position.count;
+      const col = new Float32Array(n * 3);
+      for (let vi = 0; vi < n; vi++) { col[vi * 3] = c.r; col[vi * 3 + 1] = c.g; col[vi * 3 + 2] = c.b; }
+      g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+      if (g.attributes.uv) g.deleteAttribute('uv');
+      return g;
+    };
+    this._decorStdMat = this._decorStdMat || new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 });
+    this._decorBasicMat = this._decorBasicMat || new THREE.MeshBasicMaterial({ vertexColors: true });
     const hash = (a, b) => {
       const x = Math.sin(a * 127.1 + b * 311.7) * 43758.5453;
       return x - Math.floor(x);
@@ -168,20 +193,29 @@ export class World {
       const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), E = new THREE.Euler(), V = new THREE.Vector3();
       // Полосы стрижки газона: 6 продольных лент двух тонов
       const stripeW = TRACK_HALF * 2 / 6;
-      for (let st = 0; st < 6; st++) {
-        const lawn = new THREE.Mesh(
-          new THREE.BoxGeometry(stripeW, 0.1, SEG),
-          st % 2 ? this.trackMatB : this.trackMatA
-        );
-        lawn.position.set(-TRACK_HALF + stripeW * (st + 0.5), -0.05, 0);
-        lawn.receiveShadow = true;
-        seg.add(lawn);
-      }
-      for (const lx of [-3.3, -1.1, 1.1, 3.3]) {
-        const line = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.02, SEG), lineMat);
-        line.position.set(lx, 0.011, 0);
-        line.receiveShadow = true;
-        seg.add(line);
+      {
+        // 6 полос стрижки → 2 меша (по общему материалу тона): лерп цвета зон сохраняется,
+        // box-UV каждой полосы остаются своими — текстура газона выглядит так же
+        const byTone = [[], []];
+        for (let st = 0; st < 6; st++) {
+          const g = new THREE.BoxGeometry(stripeW, 0.1, SEG);
+          g.translate(-TRACK_HALF + stripeW * (st + 0.5), -0.05, 0);
+          byTone[st % 2].push(g);
+        }
+        for (const [tone, mat] of [[0, this.trackMatA], [1, this.trackMatB]]) {
+          const lawn = new THREE.Mesh(mergeGeometries(byTone[tone]), mat);
+          lawn.receiveShadow = true;
+          seg.add(lawn);
+        }
+        // 4 боковые линии → 1 меш
+        const lgs = [-3.3, -1.1, 1.1, 3.3].map((lx) => {
+          const g = new THREE.BoxGeometry(0.07, 0.02, SEG);
+          g.translate(lx, 0.011, 0);
+          return g;
+        });
+        const lines = new THREE.Mesh(mergeGeometries(lgs), lineMat);
+        lines.receiveShadow = true;
+        seg.add(lines);
       }
       // Поперечный ритм покрытия (feel-редизайн): тёмные стыки-полосы через всю трассу
       // каждые 3 м. Продольные полосы стрижки параллельны движению и дают НОЛЬ оптического
@@ -272,11 +306,10 @@ export class World {
         grass.receiveShadow = true;
         seg.add(grass);
       }
-      // Травинки прямо на игровом поле: инстансированные пучки
+      // Травинки поля + ромашки: запекаются в общие merged-меши сегмента (см. ниже)
+      const stdParts = [], basicParts = [];
       {
         const bladeGeo = new THREE.ConeGeometry(0.022, 0.16, 3);
-        const bladeMat = new THREE.MeshStandardMaterial({ color: 0x3f8f2e, roughness: 1, flatShading: true });
-        const inst = new THREE.InstancedMesh(bladeGeo, bladeMat, 56);
         const mtx = new THREE.Matrix4();
         const q = new THREE.Quaternion();
         const e = new THREE.Euler();
@@ -289,37 +322,26 @@ export class World {
             q,
             new THREE.Vector3(1, 0.7 + rr * 0.8, 1)
           );
-          inst.setMatrixAt(b, mtx);
+          stdParts.push(bakePart(bladeGeo, mtx, 0x3f8f2e, true));
         }
-        inst.instanceMatrix.needsUpdate = true;
-        seg.add(inst);
-        // Ромашки по кромкам поля — 2 InstancedMesh (лепестки+сердцевины). Поворот -PI/2 запечён в геометрию.
-        const daisyMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-        const centerMat = new THREE.MeshBasicMaterial({ color: 0xf0d05a });
+        // Ромашки по кромкам поля (поворот -PI/2 запечён в геометрию)
         const petalGeo = new THREE.CircleGeometry(0.05, 6); petalGeo.rotateX(-Math.PI / 2);
         const coreGeo = new THREE.CircleGeometry(0.02, 5); coreGeo.rotateX(-Math.PI / 2);
-        const petalInst = new THREE.InstancedMesh(petalGeo, daisyMat, 5);
-        const coreInst = new THREE.InstancedMesh(coreGeo, centerMat, 5);
         for (let b = 0; b < 5; b++) {
           const rx = hash(i * 43 + b, 19), rz = hash(i * 47 + b, 23);
           const sdd = rx > 0.5 ? 1 : -1;
           const px = sdd * (TRACK_HALF - 0.35 - rz * 0.9), pz = -SEG / 2 + hash(b, i) * SEG;
-          petalInst.setMatrixAt(b, M.makeTranslation(px, 0.035, pz));
-          coreInst.setMatrixAt(b, M.makeTranslation(px, 0.04, pz)); // сердцевина y+0.005
+          basicParts.push(bakePart(petalGeo, M.makeTranslation(px, 0.035, pz), 0xffffff, false));
+          basicParts.push(bakePart(coreGeo, M.makeTranslation(px, 0.04, pz), 0xf0d05a, false)); // сердцевина y+0.005
         }
-        petalInst.instanceMatrix.needsUpdate = true; petalInst.computeBoundingSphere();
-        coreInst.instanceMatrix.needsUpdate = true; coreInst.computeBoundingSphere();
-        seg.add(petalInst); seg.add(coreInst);
       }
 
-      // Декор сегмента: кочки/цветы/камни → InstancedMesh (было ~20 мешей+материалов на сегмент)
+      // Декор сегмента: кочки/цветы/камни — запекаются в те же merged-наборы
       const flowerCols = [0xf0d05a, 0xe05656, 0xc77fe0, 0xf0f0f0, 0xf09a3d];
-      const tuftInst = new THREE.InstancedMesh(new THREE.ConeGeometry(0.05, 1, 4), new THREE.MeshStandardMaterial({ color: 0x4d8f38, roughness: 1, flatShading: true }), 4 * 3);
-      const stemInst = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.015, 0.02, 0.22, 4), new THREE.MeshStandardMaterial({ color: 0x3f7a30, roughness: 1 }), 3);
-      const headGeo = new THREE.IcosahedronGeometry(0.06, 0); // общая геометрия головок (материал per-цвет)
-      const rockInst = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 0), new THREE.MeshStandardMaterial({ color: 0x9aa0a8, roughness: 1, flatShading: true }), 2);
-      rockInst.castShadow = true;
-      let tk = 0, fk = 0, rk = 0;
+      const tuftGeo = new THREE.ConeGeometry(0.05, 1, 4);
+      const stemGeo = new THREE.CylinderGeometry(0.015, 0.02, 0.22, 4);
+      const headGeo = new THREE.IcosahedronGeometry(0.06, 0);
+      const rockGeo = new THREE.IcosahedronGeometry(1, 0);
       for (let d = 0; d < 9; d++) {
         const r1 = hash(i * 13 + d, 1), r2 = hash(i * 17 + d, 2), r3 = hash(i * 19 + d, 3);
         const sd = r1 > 0.5 ? 1 : -1;
@@ -331,24 +353,25 @@ export class World {
             const height = 0.28 + hash(d, k) * 0.2;
             E.set(0, 0, (hash(d, k + 7) - 0.5) * 0.5); Q.setFromEuler(E);
             V.set(x + (hash(d, k + 9) - 0.5) * 0.22, 0.14, z + (hash(d, k + 5) - 0.5) * 0.22);
-            tuftInst.setMatrixAt(tk++, M.compose(V, Q, new THREE.Vector3(1, height, 1)));
+            stdParts.push(bakePart(tuftGeo, M.compose(V, Q, new THREE.Vector3(1, height, 1)), 0x4d8f38, true));
           }
         } else if (d < 7) {
-          // Цветок: стебель (инстанс, shared зелёный) + головка (per-mesh, material.color — точный цвет)
-          stemInst.setMatrixAt(fk++, M.makeTranslation(x, 0.11, z));
-          const head = new THREE.Mesh(headGeo, new THREE.MeshStandardMaterial({ color: flowerCols[(i + d) % flowerCols.length], roughness: 0.8, flatShading: true }));
-          head.position.set(x, 0.25, z);
-          seg.add(head);
+          // Цветок: стебель (гладкие нормали сохраняются) + головка точного цвета
+          stdParts.push(bakePart(stemGeo, M.makeTranslation(x, 0.11, z), 0x3f7a30, false));
+          stdParts.push(bakePart(headGeo, M.makeTranslation(x, 0.25, z), flowerCols[(i + d) % flowerCols.length], true));
         } else {
           // Камень: базовый Icosahedron(1,0) масштабируем до (r, 0.55r, r), без поворота
           const radius = 0.16 + r2 * 0.2;
-          rockInst.setMatrixAt(rk++, M.compose(V.set(x, 0.04, z), Q.identity(), new THREE.Vector3(radius, radius * 0.55, radius)));
+          stdParts.push(bakePart(rockGeo, M.compose(V.set(x, 0.04, z), Q.identity(), new THREE.Vector3(radius, radius * 0.55, radius)), 0x9aa0a8, true));
         }
       }
-      tuftInst.instanceMatrix.needsUpdate = true; tuftInst.computeBoundingSphere();
-      stemInst.instanceMatrix.needsUpdate = true; stemInst.computeBoundingSphere();
-      rockInst.instanceMatrix.needsUpdate = true; rockInst.computeBoundingSphere();
-      seg.add(tuftInst, stemInst, rockInst);
+      // Финальная сборка декора: 9 объектов → 2 меша на сегмент
+      {
+        const stdMesh = new THREE.Mesh(mergeGeometries(stdParts), this._decorStdMat);
+        stdMesh.castShadow = true; // тени давали камни — сохраняем
+        const basicMesh = new THREE.Mesh(mergeGeometries(basicParts), this._decorBasicMat);
+        seg.add(stdMesh, basicMesh);
+      }
       seg.position.z = -i * SEG + SEG;
       seg.userData.z0 = seg.position.z;
       this.scene.add(seg);
@@ -384,6 +407,7 @@ export class World {
       banner.position.y = 4.15;
       banner.castShadow = true;
       arch.add(banner);
+      bakeStatic(arch); // пилоны+8 шаров → 2 меша; баннер (map) не трогается
       arch.position.z = -90 - i * 240;
       arch.userData.z0 = arch.position.z;
       this.scene.add(arch);
@@ -391,12 +415,16 @@ export class World {
     }
 
     // Птицы в небе: клин из «галочек»
+    // Птицы: прокси-крылья (анимация пишет rotation), рисует один InstancedMesh
     this.birds = new THREE.Group();
-    const birdMat = new THREE.MeshBasicMaterial({ color: 0x2a3242, side: THREE.DoubleSide });
+    this.birdInst = new THREE.InstancedMesh(new THREE.PlaneGeometry(0.9, 0.3),
+      new THREE.MeshBasicMaterial({ color: 0x2a3242, side: THREE.DoubleSide }), 10);
+    this.birdInst.frustumCulled = false;
+    this.birds.add(this.birdInst);
     for (let i = 0; i < 5; i++) {
       const bird = new THREE.Group();
       for (const sd of [-1, 1]) {
-        const wing = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.3), birdMat);
+        const wing = new THREE.Object3D();
         wing.position.x = sd * 0.42;
         wing.userData.side = sd;
         bird.add(wing);
@@ -407,13 +435,22 @@ export class World {
     this.birds.position.set(8, 0, -70);
     this.scene.add(this.birds);
 
-    // Бабочки у травы (видны в парке/на закате)
+    // Бабочки у травы: прокси + один InstancedMesh с instanceColor
     this.butterflies = [];
+    this.bflyInst = new THREE.InstancedMesh(new THREE.PlaneGeometry(0.14, 0.18),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide }), 8);
+    this.bflyInst.frustumCulled = false;
+    {
+      const cols = [0xf0d05a, 0xe07fb0, 0x9adcff, 0xf09a3d];
+      const c = new THREE.Color();
+      for (let i = 0; i < 4; i++) for (let w = 0; w < 2; w++) this.bflyInst.setColorAt(i * 2 + w, c.setHex(cols[i]));
+      this.bflyInst.instanceColor.needsUpdate = true;
+    }
+    this.scene.add(this.bflyInst);
     for (let i = 0; i < 4; i++) {
       const b = new THREE.Group();
-      const m = new THREE.MeshBasicMaterial({ color: [0xf0d05a, 0xe07fb0, 0x9adcff, 0xf09a3d][i], side: THREE.DoubleSide });
       for (const sd of [-1, 1]) {
-        const wing = new THREE.Mesh(new THREE.PlaneGeometry(0.14, 0.18), m);
+        const wing = new THREE.Object3D();
         wing.position.x = sd * 0.07;
         wing.userData.side = sd;
         b.add(wing);
@@ -1103,26 +1140,30 @@ export class World {
       }
     }
     this._syncAllBannerMatrices();
-    // Деревья для парковых зон (рециклятся вместе с трибунами, видимость по зоне)
+    // Деревья для парковых зон: прокси-Object3D (рецикл/rebase как раньше) +
+    // ОДИН InstancedMesh merged-дерева — было 4 меша × 14 деревьев
     this.trees = [];
-    const trunkMat = new THREE.MeshStandardMaterial({ color: 0x7a5230, roughness: 1 });
-    for (let i = 0; i < 14; i++) {
-      const tree = new THREE.Group();
-      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.2, 1.6, 6), trunkMat);
-      trunk.position.y = 0.8;
-      tree.add(trunk);
-      const leafMat = new THREE.MeshStandardMaterial({ color: 0x4e9440, roughness: 1, flatShading: true });
+    {
+      const treeParts = [];
+      const mtx = new THREE.Matrix4();
+      mtx.makeTranslation(0, 0.8, 0);
+      treeParts.push(bakeColored(new THREE.CylinderGeometry(0.14, 0.2, 1.6, 6), mtx, 0x7a5230, false));
       for (let j = 0; j < 3; j++) {
-        const puff = new THREE.Mesh(new THREE.IcosahedronGeometry(0.9 - j * 0.18, 0), leafMat);
-        puff.position.y = 1.8 + j * 0.6;
-        puff.castShadow = true;
-        tree.add(puff);
+        mtx.makeTranslation(0, 1.8 + j * 0.6, 0);
+        treeParts.push(bakeColored(new THREE.IcosahedronGeometry(0.9 - j * 0.18, 0), mtx, 0x4e9440, true));
       }
+      this.treeInst = new THREE.InstancedMesh(mergeColored(treeParts),
+        new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 }), 14);
+      this.treeInst.castShadow = true;
+      this.treeInst.frustumCulled = false;
+      this.scene.add(this.treeInst);
+    }
+    for (let i = 0; i < 14; i++) {
+      const tree = new THREE.Object3D(); // прокси: позиция/поворот/visible
       const side = i % 2 ? 1 : -1;
       tree.position.set(side * (TRACK_HALF + 2.5 + (i * 13) % 6), 0, -i * 26 + 20);
       tree.userData.baseX = tree.position.x;
       tree.userData.z0 = tree.position.z;
-      this.scene.add(tree);
       this.trees.push(tree);
     }
     // Параллакс-слой: дальняя гряда фасеточных гор, движется вместе с собакой (иллюзия бесконечной дали)
@@ -1189,6 +1230,7 @@ export class World {
         new THREE.MeshStandardMaterial({ color: 0xf5f0e6 }));
       flag.position.y = 2.5;
       tent.add(flag);
+      bakeStatic(tent, [], { collapse: true });
       const side = i % 2 ? 1 : -1;
       tent.position.set(side * (TRACK_HALF + 4.2 + (i * 7) % 3), 0, -i * 52 + 20);
       tent.userData.z0 = tent.position.z;
@@ -1337,6 +1379,7 @@ export class World {
       // лёгкое покачивание кроны
       tr.rotation.z = Math.sin(this.time * 1.3 + tr.position.z) * 0.02;
     }
+    this._syncProxyInstances();
     let bannerRecycled = false;
     for (let i = 0; i < this.banners.length; i++) {
       const marker = this.banners[i];
@@ -1388,6 +1431,46 @@ export class World {
       for (const wing of b.children) wing.rotation.y = wing.userData.side * flap;
       b.visible = this.currentZone === 'park' || this.currentZone === 'sunset';
     }
+  }
+
+  // Матрицы инстансов из прокси-объектов (деревья/птицы/бабочки): анимационный код
+  // и рецикл/rebase работают с прокси как раньше, рисуют 3 InstancedMesh
+  _syncProxyInstances() {
+    const M = this._propMtx, Q = _piQ, S = _piS, E = _piE;
+    S.set(1, 1, 1);
+    for (let i = 0; i < this.trees.length; i++) {
+      const tr = this.trees[i];
+      if (tr.visible) {
+        E.set(0, 0, tr.rotation.z); Q.setFromEuler(E);
+        M.compose(tr.position, Q, S);
+      } else M.makeScale(0, 0, 0);
+      this.treeInst.setMatrixAt(i, M);
+    }
+    this.treeInst.instanceMatrix.needsUpdate = true;
+    let bi = 0;
+    for (const bird of this.birds.children) {
+      if (bird === this.birdInst) continue;
+      for (const wing of bird.children) {
+        E.set(0, 0, wing.rotation.z); Q.setFromEuler(E);
+        _piV.copy(wing.position).add(bird.position);
+        // порядок оригинала: смещение крыла в системе птицы, поворот вокруг центра крыла
+        M.compose(_piV, Q, S);
+        this.birdInst.setMatrixAt(bi++, M);
+      }
+    }
+    this.birdInst.instanceMatrix.needsUpdate = true;
+    let fi = 0;
+    for (const b of this.butterflies) {
+      for (const wing of b.children) {
+        if (b.visible) {
+          E.set(0, wing.rotation.y, 0); Q.setFromEuler(E);
+          _piV.copy(wing.position).add(b.position);
+          M.compose(_piV, Q, S);
+        } else M.makeScale(0, 0, 0);
+        this.bflyInst.setMatrixAt(fi++, M);
+      }
+    }
+    this.bflyInst.instanceMatrix.needsUpdate = true;
   }
 
   // Сдвиг всего мира на +dz для сохранения точности float (rebase)

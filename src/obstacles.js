@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { LANE_X } from './world.js';
+import { bakeColored, mergeColored, bakeStatic } from './bake.js';
 
 // Снаряды аджилити (обязательные к прохождению), помехи (избегать) и пикапы.
 // Каждый билдер возвращает объект-запись: { kind, lane, z, group, ...геометрия механики }.
@@ -32,15 +33,19 @@ const POLE_WHITE = 0xf5f2ea;
 const STRIPE_RED = 0xd8434e;
 
 function stripedBar(len, r, colA = STRIPE_RED, colB = POLE_WHITE, segs = 5) {
+  // Полосатая планка ОДНИМ мешем: сегменты запечены с vertex colors
   const bar = new THREE.Group();
   const segLen = len / segs;
+  const parts = [];
+  const mtx = new THREE.Matrix4();
   for (let i = 0; i < segs; i++) {
-    const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, segLen, 8), std(i % 2 ? colB : colA));
-    m.rotation.z = Math.PI / 2;
-    m.position.x = -len / 2 + segLen * (i + 0.5);
-    m.castShadow = true;
-    bar.add(m);
+    const geo = new THREE.CylinderGeometry(r, r, segLen, 8);
+    mtx.makeRotationZ(Math.PI / 2).setPosition(-len / 2 + segLen * (i + 0.5), 0, 0);
+    parts.push(bakeColored(geo, mtx, i % 2 ? colB : colA, true));
   }
+  const m = new THREE.Mesh(mergeColored(parts), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 }));
+  m.castShadow = true;
+  bar.add(m);
   return bar;
 }
 
@@ -65,6 +70,7 @@ export function buildHurdle(lane, z) {
   const bar = stripedBar(1.6, 0.045);
   bar.position.y = 0.58;
   g.add(bar);
+  bakeStatic(g, [bar]);
   g.position.set(LANE_X[lane], 0, z);
   const rec = {
     kind: 'hurdle', lane, z, group: g, barHeight: 0.58, resolved: false,
@@ -107,6 +113,7 @@ export function buildTire(lane, z) {
     rope.rotation.z = x < 0 ? -0.5 : 0.5;
     g.add(rope);
   }
+  bakeStatic(g, [tire]);
   g.position.set(LANE_X[lane], 0, z);
   const rec = {
     kind: 'tire', lane, z, group: g, centerY: 1.32, resolved: false, flashT: 0,
@@ -275,6 +282,7 @@ export function buildAFrame(lane, z) {
       g.add(rail);
     }
   }
+  bakeStatic(g, [czUp, czDown]);
   g.position.set(LANE_X[lane], 0, z);
   const rec = {
     kind: 'aframe', lane, z, group: g,
@@ -353,6 +361,7 @@ export function buildDogwalk(lane, z) {
       g.add(leg);
     }
   }
+  bakeStatic(g);
   g.position.set(LANE_X[lane], 0, z);
   const totalHalf = plankLen / 2 + rampLen;
   const rec = {
@@ -478,6 +487,7 @@ export function buildTable(lane, z) {
     leg.position.set(x, 0.25, zz);
     g.add(leg);
   }
+  bakeStatic(g, [top]);
   g.position.set(LANE_X[lane], 0, z);
   const rec = {
     kind: 'table', lane, z, group: g, h: 0.61, resolved: false, glowT: 0, top,
@@ -543,6 +553,7 @@ export function buildPodium(lane, z, length = 26) {
       g.add(ban);
     }
   }
+  bakeStatic(g);
   g.position.set(LANE_X[lane], 0, z);
   const rec = {
     kind: 'podium', lane, z, group: g, h: H, width,
@@ -588,6 +599,7 @@ export function buildCart(lane, z) {
     wheel.position.set(x, 0.18, zz);
     g.add(wheel);
   }
+  bakeStatic(g);
   g.position.set(LANE_X[lane], 0, z);
   return { kind: 'cart', hazard: true, lethal: true, lane, z, group: g, halfW: 0.8, halfD: 0.55, height: 1.9, resolved: false, update() {} };
 }
@@ -780,35 +792,106 @@ function cookieShared() {
   _cookieMatGold = std(0xffc93d, { roughness: 0.3, emissive: 0x8a5c08 }); _cookieMatGold.userData.shared = true;
 }
 
+// Батч косточек: ~40 видимых печенек = 80 draw calls (тело+глинт каждая) были
+// главным одиночным пожирателем трека. Два InstancedMesh (норм/золото — материалы
+// различаются и emissive), матрицы пишет update записи — анимация та же 1:1.
+let _cookieBatch = null;
+const _cbM = new THREE.Matrix4(), _cbQ = new THREE.Quaternion(), _cbE = new THREE.Euler(), _cbS = new THREE.Vector3();
+export function initCookieBatch(scene) {
+  cookieShared();
+  if (_cookieBatch) { scene.add(_cookieBatch.norm.im, _cookieBatch.gold.im); return _cookieBatch; }
+  const CAP = 160;
+  const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+  const mk = (mat) => {
+    const im = new THREE.InstancedMesh(_cookieGeo, mat, CAP);
+    im.frustumCulled = false; // косточки размазаны на 170 м вперёд — почти всегда в кадре
+    for (let i = 0; i < CAP; i++) im.setMatrixAt(i, zero);
+    im.instanceMatrix.needsUpdate = true;
+    scene.add(im);
+    return im;
+  };
+  const mkSide = (im) => ({
+    im, free: [], used: new Set(),
+    acquire() {
+      const slot = this.free.pop();
+      if (slot === undefined) return -1;
+      this.used.add(slot);
+      if (slot >= this.im.count) this.im.count = slot + 1;
+      return slot;
+    },
+    release(slot) {
+      this.used.delete(slot);
+      this.free.push(slot);
+      this.im.setMatrixAt(slot, _cookieBatch.zero);
+      this.im.instanceMatrix.needsUpdate = true;
+      if (slot === this.im.count - 1) {
+        let c = slot;
+        while (c > 0 && !this.used.has(c - 1)) c--;
+        this.im.count = c;
+      }
+    },
+  });
+  const normIm = mk(_cookieMat), goldIm = mk(_cookieMatGold);
+  normIm.count = 0; goldIm.count = 0; // рисуем занятый префикс, не всю ёмкость (triangles!)
+  _cookieBatch = { norm: mkSide(normIm), gold: mkSide(goldIm), zero };
+  for (let i = CAP - 1; i >= 0; i--) { _cookieBatch.norm.free.push(i); _cookieBatch.gold.free.push(i); }
+  return _cookieBatch;
+}
+
 export function buildCookie(lane, z, y = 0.5, dx = 0, gold = false) {
   cookieShared();
   const g = new THREE.Group();
   if (gold) g.scale.setScalar(1.22);
-  // Косточка: одно слитое тело (общая геометрия/материал)
-  g.add(new THREE.Mesh(_cookieGeo, gold ? _cookieMatGold : _cookieMat));
-  // Глинт-звёздочка: периодическая вспышка, чтобы косточку хотелось взять
+  const batch = _cookieBatch;
+  const side = batch ? (gold ? batch.gold : batch.norm) : null;
+  const slot = side ? side.acquire() : -1;
+  // Фолбэк на одиночный Mesh: батч не инициализирован (юнит-контекст) или переполнен
+  if (slot < 0) g.add(new THREE.Mesh(_cookieGeo, gold ? _cookieMatGold : _cookieMat));
+  // Глинт-звёздочка: периодическая вспышка, чтобы косточку хотелось взять.
+  // visible-переключение: спрайт с opacity 0 всё равно стоил draw call (~35 лишних).
   const glint = new THREE.Sprite(new THREE.SpriteMaterial({
     map: glintTexture(), transparent: true, opacity: 0,
     blending: THREE.AdditiveBlending, depthWrite: false,
   }));
   glint.position.set(0.07, 0.06, 0);
+  glint.visible = false;
   g.add(glint);
   g.position.set(LANE_X[lane] + dx, y, z);
   return { kind: 'cookie', pickup: true, lane, z, y, group: g, resolved: false, t: Math.abs(z) % 6.28, glint, value: gold ? 2 : 1,
+    slot, _im: slot >= 0 ? side.im : null, _side: side,
     update(dt) {
       this.t += dt;
       this.group.rotation.y = this.t * 3;
       this.group.position.y = this.y + Math.sin(this.t * 4) * 0.05;
+      if (this.slot >= 0) {
+        if (this.group.visible) {
+          _cbE.set(0, this.group.rotation.y, 0);
+          _cbQ.setFromEuler(_cbE);
+          _cbS.setScalar(this.value > 1 ? 1.22 : 1);
+          _cbM.compose(this.group.position, _cbQ, _cbS);
+          this._im.setMatrixAt(this.slot, _cbM);
+        } else {
+          this._im.setMatrixAt(this.slot, _cookieBatch.zero);
+        }
+        this._im.instanceMatrix.needsUpdate = true;
+      }
       // Вспышка ~раз в 2.4 с, у каждой косточки своя фаза
       const ph = this.t % 2.4;
-      if (ph < 0.35) {
+      if (ph < 0.35 && this.group.visible) {
         const k = Math.sin((ph / 0.35) * Math.PI);
+        this.glint.visible = true;
         this.glint.material.opacity = k * 0.95;
         this.glint.scale.setScalar(0.12 + k * 0.3);
         this.glint.material.rotation = this.t * 2;
       } else {
+        this.glint.visible = false;
         this.glint.material.opacity = 0;
       }
+    },
+    releaseSlot() {
+      if (this.slot < 0) return;
+      this._side.release(this.slot);
+      this.slot = -1;
     } };
 }
 

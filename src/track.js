@@ -1,7 +1,7 @@
 import {
   buildHurdle, buildTire, buildTunnel, buildWeave, buildAFrame,
   buildDogwalk, buildSeesaw, buildTable, buildCart, buildHay, buildFence,
-  buildCone, buildPuddle, buildSprinkler, buildCookie, buildPowerup,
+  buildCone, buildPuddle, buildSprinkler, buildCookie, initCookieBatch, buildPowerup,
   buildPodium, buildRecordFlag, buildToken, buildLetter,
 } from './obstacles.js';
 
@@ -32,6 +32,7 @@ function disposeGroup(group) {
 export class Track {
   constructor(scene, rng) {
     this.scene = scene;
+    initCookieBatch(scene); // батч печенек живёт на сцене, слоты выдаёт buildCookie
     this.rng = rng;
     this.entities = [];
     this.nextSpawnZ = -30; // следующий чанк начинается тут (собака бежит в -Z)
@@ -41,7 +42,7 @@ export class Track {
   }
 
   reset() {
-    for (const e of this.entities) { this.scene.remove(e.group); disposeGroup(e.group); }
+    for (const e of this.entities) { if (e.releaseSlot) e.releaseSlot(); this.scene.remove(e.group); disposeGroup(e.group); }
     this.entities = [];
     this.nextSpawnZ = -30;
     this.chunkIndex = 0;
@@ -325,6 +326,7 @@ export class Track {
     for (let i = this.entities.length - 1; i >= 0; i--) {
       const e = this.entities[i];
       if (e.z > dogZ + 18 || (e.exit != null && e.exit > dogZ + 18)) {
+        if (e.releaseSlot) e.releaseSlot();
         this.scene.remove(e.group);
         disposeGroup(e.group); // освобождаем GPU-память — иначе на долгом забеге контекст теряется
         this.entities.splice(i, 1);
