@@ -457,17 +457,19 @@ export class World {
       'park-bench':    { h: 1.4,  rot: Math.PI }, // фронт модели — спинка: разворот
       'dog-statue':    { h: 2.9,  rot: 0 },
       'podium':        { h: 1.7,  rot: 0 },
+      'crate-stack':   { h: 1.5,  rot: 0 }, // переноски: «зона выдержки» стадиона
+      'ice-cream':     { h: 3.4,  rot: 0 }, // киоск-мороженое: парковые сцены
     };
     // items: [имя, dxНаружу(м от базовой линии), dzВдоль(м), rotДоп]
     // Разбег dz увеличен под выросшие масштабы; dxOut ограничен — пропы НЕ должны
     // пересекать переднюю грань трибун (см. кап в _updateGenProps)
     const CLUSTERS = [
-      { key: 'judge',    zones: ['stadium', 'night'],  items: [['judge-booth', 0, 0, 0], ['flag-cluster', 1.4, 5.2, 0.25], ['water-station', -0.7, -4.6, 0]] },
-      { key: 'media',    zones: ['stadium', 'night'],  items: [['camera-tower', 1.2, 0, 0], ['score-board', -0.5, 6.0, -0.15]] },
-      { key: 'spect',    zones: ['park', 'sunset'],    items: [['park-bench', 0, 0, 0], ['park-bench', 0.4, 3.8, 0.12], ['food-cart', 2.2, -4.6, 0.2]] },
-      { key: 'rest',     zones: ['park', 'sunset'],    items: [['park-bench', 0, 0, 0], ['water-station', 0.7, 3.4, 0], ['agility-sign', 1.6, -4.0, 0]] },
-      { key: 'ceremony', zones: null,                  items: [['podium', 0, 0, 0], ['dog-statue', 1.8, 4.6, 0.35], ['flag-cluster', 1.6, -4.8, -0.2]] },
-      { key: 'entry',    zones: null,                  items: [['agility-sign', 0, 0, 0], ['flag-cluster', 1.4, 3.6, 0]] },
+      { key: 'judge',    zones: ['stadium', 'night'],  items: [['judge-booth', 0, 0, 0], ['flag-cluster', 1.4, 5.2, 0.25], ['water-station', -0.7, -4.6, 0], ['crate-stack', 0.9, 9.2, 0.3]] },
+      { key: 'media',    zones: ['stadium', 'night'],  items: [['camera-tower', 1.2, 0, 0], ['score-board', -0.5, 6.0, -0.15], ['crate-stack', 0.8, -5.2, -0.2]] },
+      { key: 'spect',    zones: ['park', 'sunset'],    items: [['park-bench', 0, 0, 0], ['park-bench', 0.4, 3.8, 0.12], ['food-cart', 2.2, -4.6, 0.2], ['ice-cream', 2.4, 9.0, -0.15]] },
+      { key: 'rest',     zones: ['park', 'sunset'],    items: [['park-bench', 0, 0, 0], ['water-station', 0.7, 3.4, 0], ['agility-sign', 1.6, -4.0, 0], ['ice-cream', 2.2, 8.6, 0.2]] },
+      { key: 'ceremony', zones: null,                  items: [['podium', 0, 0, 0], ['dog-statue', 1.8, 4.6, 0.35], ['flag-cluster', 1.6, -4.8, -0.2], ['camera-tower', 2.0, 9.8, 0.15]] },
+      { key: 'entry',    zones: null,                  items: [['agility-sign', 0, 0, 0], ['flag-cluster', 1.4, 3.6, 0], ['dog-statue', 1.9, -4.4, -0.25]] },
     ];
     this.genClusters = CLUSTERS;
     this.genPropDefs = PROPS;
@@ -481,7 +483,7 @@ export class World {
           const size = box.getSize(new THREE.Vector3());
           const k = def.h / Math.max(0.01, size.y);
           this.genPropPool[name] = [];
-          for (let c = 0; c < 4; c++) { // до 2 кластеров в окне × до 2 использований типа
+          for (let c = 0; c < 6; c++) { // до 3 кластеров в окне × до 2 использований типа
             const inst = proto.clone(true);
             inst.scale.setScalar(k);
             inst.visible = false;
@@ -495,6 +497,31 @@ export class World {
           }
         }, undefined, () => { /* файл недоступен — проп не появится */ });
       });
+      // Шаровая арка над трассой — «чекпойнт»-момент каждые ~240 м. Отдельный пул:
+      // это НАД-трассовый декор, ему положено поперёк (наземный prop-guard её не судит).
+      loader.load('./assets/gen/balloon-arch.glb', (gltf) => {
+        const proto = gltf.scene;
+        const box = new THREE.Box3().setFromObject(proto);
+        const size = box.getSize(new THREE.Vector3());
+        // Модель плоская: размах арки — БОЛЬШАЯ горизонтальная ось (у GLB это Z,
+        // масштаб по X-толщине давал гиганта ×40). Центрируем в обёртке и
+        // поворачиваем размахом поперёк трассы.
+        const span = Math.max(size.x, size.z);
+        const k = (TRACK_HALF + 1.6) * 2 / Math.max(0.01, span);
+        const cx = (box.min.x + box.max.x) / 2, cz = (box.min.z + box.max.z) / 2;
+        this.balloonArches = [];
+        for (let c = 0; c < 2; c++) {
+          const wrap = new THREE.Group();
+          const inst = proto.clone(true);
+          inst.scale.setScalar(k);
+          inst.position.set(-cx * k, -box.min.y * k, -cz * k);
+          wrap.add(inst);
+          if (size.z > size.x) wrap.rotation.y = Math.PI / 2; // размах — поперёк трассы
+          wrap.visible = false;
+          this.scene.add(wrap);
+          this.balloonArches.push({ root: wrap, yBase: 0 });
+        }
+      }, undefined, () => { /* нет файла — без арок */ });
       this._genPropsPeriodMul = D;
       this.genProps = [{ ready: true }]; // маркер «пул активен» для внешних проверок
     });
@@ -503,7 +530,7 @@ export class World {
   _updateGenProps(dogZ, dist) {
     if (!this.genPropPool) return;
     const D = this._genPropsPeriodMul || 1;
-    const STEP = 80 * D; // слот кластера
+    const STEP = 56 * D; // слот кластера (56: плотнее — фидбек «мир пустоват»)
     // Сначала прячем все клоны, затем расставляем нужные (окно: 2-3 слота впереди)
     for (const arr of Object.values(this.genPropPool)) for (const p of arr) { p._used = false; }
     const baseSlot = Math.floor(dist / STEP);
@@ -569,6 +596,25 @@ export class World {
       }
     }
     for (const arr of Object.values(this.genPropPool)) for (const p of arr) { if (!p._used) p.root.visible = false; }
+    // Шаровые арки: слот каждые 240 м, позиция — чистая функция дистанции слота
+    if (this.balloonArches && this.balloonArches.length) {
+      const ASTEP = 240 * D;
+      const aBase = Math.floor(dist / ASTEP);
+      for (const a of this.balloonArches) a._used = false;
+      for (let sOff = 0; sOff < 2; sOff++) {
+        const slot = aBase + sOff;
+        const aDist = slot * ASTEP + 130; // смещение — не совпадать со стартом зоны
+        const az = dogZ - (aDist - dist);
+        const rel = dogZ - az;
+        if (rel < -30 || rel > 200) continue;
+        const a = this.balloonArches[slot % this.balloonArches.length];
+        if (a._used) continue;
+        a._used = true;
+        a.root.visible = true;
+        a.root.position.set(0, a.yBase, az);
+      }
+      for (const a of this.balloonArches) if (!a._used) a.root.visible = false;
+    }
   }
 
 

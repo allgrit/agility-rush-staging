@@ -7,6 +7,25 @@ import { LANE_X } from './world.js';
 // решения по механике принимает game.js.
 
 const std = (color, opts = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.85, metalness: 0, flatShading: true, ...opts });
+
+// GLB-прототип стога (tripo-ассет): грузится лениво при старте модуля; до загрузки
+// buildHay строит процедурный fallback — коллизия в обоих случаях одна.
+let hayProto = null;
+import('three/addons/loaders/GLTFLoader.js').then(({ GLTFLoader }) => {
+  new GLTFLoader().load('./assets/gen/hay-bale.glb', (gltf) => {
+    const root = gltf.scene;
+    const box = new THREE.Box3().setFromObject(root);
+    const size = box.getSize(new THREE.Vector3());
+    const k = 1.5 / Math.max(0.01, size.y); // высота препятствия — как у процедурного (1.5)
+    root.scale.setScalar(k);
+    hayProto = {
+      root,
+      yBase: -box.min.y * k,
+      cx: -(box.min.x + box.max.x) / 2 * k, // центрирование по XZ
+      cz: -(box.min.z + box.max.z) / 2 * k,
+    };
+  }, undefined, () => { /* нет файла — остаёмся на процедурном */ });
+}).catch(() => { /* окружение без GLTFLoader (юнит-контекст) — fallback */ });
 const CONTACT_YELLOW = 0xf2c531;
 const AGILITY_BLUE = 0x2f6fd0;
 const POLE_WHITE = 0xf5f2ea;
@@ -577,6 +596,19 @@ export function buildCart(lane, z) {
 // Тематично аджилити-празднику; коллизия идентична cart (halfW/height/lethal).
 export function buildHay(lane, z) {
   const g = new THREE.Group();
+  if (hayProto) {
+    const inst = hayProto.root.clone(true);
+    inst.position.set(hayProto.cx, hayProto.yBase, hayProto.cz);
+    // лёгкая детерминированная вариация поворота от координаты (без rng — визуал)
+    inst.rotation.y = Math.sin(z * 0.7) * 0.35;
+    g.add(inst);
+    g.position.set(LANE_X[lane], 0, z);
+    return {
+      kind: 'hay', lane, z, group: g, resolved: false,
+      hazard: true, lethal: true, halfW: 0.8, halfD: 0.55, height: 1.5,
+      update() { /* статичен */ },
+    };
+  }
   const straw = std(0xd8a83c, { roughness: 0.95 });
   const strap = std(0x8a5f30, { roughness: 0.9 });
   const b1 = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.75, 1.0), straw);

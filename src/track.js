@@ -295,7 +295,7 @@ export class Track {
     const builders = {
       hurdle: buildHurdle, tire: buildTire, tunnel: buildTunnel, weave: buildWeave,
       aframe: buildAFrame, dogwalk: buildDogwalk, seesaw: buildSeesaw, table: buildTable,
-      cart: buildCart, cone: buildCone, puddle: buildPuddle, sprinkler: buildSprinkler, podium: buildPodium, token: buildToken,
+      cart: buildCart, hay: buildHay, cone: buildCone, puddle: buildPuddle, sprinkler: buildSprinkler, podium: buildPodium, token: buildToken,
     };
     if (kind === 'fence') return this._add(buildFence([lane], z));
     if (kind === 'cookie') return this._add(buildCookie(lane, z));
