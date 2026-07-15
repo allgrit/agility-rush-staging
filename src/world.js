@@ -1210,14 +1210,16 @@ export class World {
       head.rotation.z = -s * 0.35; // панель наклонена К трассе (знак был от неё)
       mast.add(head);
       // Световой конус (аддитивный) и пятно на трассе
+      // Длина оси = дистанция лампа(−0.5s,8) → пятно(−4.6s,0) ≈ 9.0: короче — обод
+      // повисает над полом («конус не доведён до пола»); 9.2 слегка топит обод в землю
       const cone = new THREE.Mesh(
-        new THREE.ConeGeometry(3.2, 8.5, 12, 1, true),
+        new THREE.ConeGeometry(3.2, 9.2, 12, 1, true),
         new THREE.MeshBasicMaterial({ color: 0xfff2c0, transparent: true, opacity: 0.09, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false })
       );
       // Вершина конуса обязана совпадать с лампой (−0.5s, 8), основание — с пятном
       // на трассе (−4.6s, 0): наклон −0.47s. Прежний +0.42s вершил конус в воздухе
       // в 4 м от фонаря («свет идёт не от фонаря»).
-      cone.position.set(-s * 2.6, 4.2, 0);
+      cone.position.set(-s * 2.55, 4.0, 0);
       cone.rotation.z = -s * 0.47;
       mast.add(cone);
       const pool = new THREE.Mesh(
