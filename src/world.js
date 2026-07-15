@@ -457,13 +457,15 @@ export class World {
       'podium':        { h: 1.7,  rot: 0 },
     };
     // items: [имя, dxНаружу(м от базовой линии), dzВдоль(м), rotДоп]
+    // Разбег dz увеличен под выросшие масштабы; dxOut ограничен — пропы НЕ должны
+    // пересекать переднюю грань трибун (см. кап в _updateGenProps)
     const CLUSTERS = [
-      { key: 'judge',    zones: ['stadium', 'night'],  items: [['judge-booth', 0, 0, 0], ['flag-cluster', 2.4, 3.2, 0.25], ['water-station', -0.6, -3.4, 0]] },
-      { key: 'media',    zones: ['stadium', 'night'],  items: [['camera-tower', 1.6, 0, 0], ['score-board', -0.4, 4.2, -0.15]] },
-      { key: 'spect',    zones: ['park', 'sunset'],    items: [['park-bench', 0, 0, 0], ['park-bench', 0.4, 2.6, 0.12], ['food-cart', 3.0, -2.8, 0.2]] },
-      { key: 'rest',     zones: ['park', 'sunset'],    items: [['park-bench', 0, 0, 0], ['water-station', 0.6, 2.2, 0], ['agility-sign', 2.2, -2.6, 0]] },
-      { key: 'ceremony', zones: null,                  items: [['podium', 0, 0, 0], ['dog-statue', 2.6, 3.0, 0.35], ['flag-cluster', 2.2, -3.2, -0.2]] },
-      { key: 'entry',    zones: null,                  items: [['agility-sign', 0, 0, 0], ['flag-cluster', 1.8, 2.4, 0]] },
+      { key: 'judge',    zones: ['stadium', 'night'],  items: [['judge-booth', 0, 0, 0], ['flag-cluster', 1.4, 5.2, 0.25], ['water-station', -0.7, -4.6, 0]] },
+      { key: 'media',    zones: ['stadium', 'night'],  items: [['camera-tower', 1.2, 0, 0], ['score-board', -0.5, 6.0, -0.15]] },
+      { key: 'spect',    zones: ['park', 'sunset'],    items: [['park-bench', 0, 0, 0], ['park-bench', 0.4, 3.8, 0.12], ['food-cart', 2.2, -4.6, 0.2]] },
+      { key: 'rest',     zones: ['park', 'sunset'],    items: [['park-bench', 0, 0, 0], ['water-station', 0.7, 3.4, 0], ['agility-sign', 1.6, -4.0, 0]] },
+      { key: 'ceremony', zones: null,                  items: [['podium', 0, 0, 0], ['dog-statue', 1.8, 4.6, 0.35], ['flag-cluster', 1.6, -4.8, -0.2]] },
+      { key: 'entry',    zones: null,                  items: [['agility-sign', 0, 0, 0], ['flag-cluster', 1.4, 3.6, 0]] },
     ];
     this.genClusters = CLUSTERS;
     this.genPropDefs = PROPS;
@@ -510,7 +512,12 @@ export class World {
       const zBase = dogZ - (slot * STEP + h * STEP * 0.35 - dist);
       const rel = dogZ - zBase;
       if (rel < -40 || rel > 170) continue;
-      const xBase = TRACK_HALF + 1.9 + h * 1.2;
+      const xBase = TRACK_HALF + 1.9 + h * 1.0;
+      // Трибуны: центр на ±(TRACK_HALF+4.4), глубина 2.6 → передняя грань ≈ ±7.3.
+      // В зонах с трибунами пропы не заходят за неё (иначе пересечения с блоками).
+      const standsOn = zone === 'stadium' || zone === 'night';
+      const maxX = standsOn ? TRACK_HALF + 2.9 : TRACK_HALF + 5.5;
+      const placed = []; // анти-пересечения внутри кластера: {z, r}
       for (const [name, dxOut, dz, rotAdd] of cl.items) {
         const pool = this.genPropPool[name];
         if (!pool) continue;
@@ -518,9 +525,18 @@ export class World {
         if (!inst) continue;
         inst._used = true;
         inst.root.visible = true;
-        inst.root.position.set(side * (xBase + dxOut), inst.yBase, zBase + dz);
-        // Лицом к трассе: фронт GLB = +Z (front-вид развёртки); справа −π/2, слева +π/2,
-        // плюс поправка модели (rot) и композиционная вариация (rotAdd)
+        const px = side * Math.min(xBase + dxOut, maxX);
+        // Радиус пропа ~ треть высоты; раздвигаем по z при конфликте (до 3 шагов)
+        const r = Math.max(0.8, (this.genPropDefs[name].h || 2) * 0.35);
+        let pz = zBase + dz;
+        for (let t = 0; t < 3; t++) {
+          const clash = placed.find(q => Math.abs(q.z - pz) < (q.r + r));
+          if (!clash) break;
+          pz += (q => q.r + r + 0.4)(clash) * (dz >= 0 ? 1 : -1);
+        }
+        placed.push({ z: pz, r });
+        inst.root.position.set(px, inst.yBase, pz);
+        // Лицом к трассе: фронт GLB = +Z; справа −π/2, слева +π/2 + поправка модели + вариация
         inst.root.rotation.y = side * -(Math.PI / 2) + inst.rot + rotAdd + (h - 0.5) * 0.25;
       }
     }
