@@ -248,7 +248,10 @@ export class World {
           if (!onEdgeZ) pos0.setZ(v, vz + (hash(vx, i * 5 + vz) - 0.5) * 3.4);
           const h = hash(i * 7 + vx * 0.35, vz * 0.35);
           // Внутренняя кромка совпадает с уровнем трассы; полный рельеф начинается дальше от неё.
-          pos0.setY(v, 0.12 + (h - 0.3) * (0.04 + edge * 3.2));
+          // Кромки Z: высота НЕ зависит от индекса сегмента — иначе на стыках сегментов
+          // рельеф не совпадал и в земле были щели (видимые «провалы» до неба).
+          if (onEdgeZ) pos0.setY(v, 0.12 + 0.28 * edge);
+          else pos0.setY(v, 0.12 + (h - 0.3) * (0.04 + edge * 3.2));
         }
         geo = geo.toNonIndexed();
         const pos = geo.attributes.position;
@@ -437,68 +440,93 @@ export class World {
     // Дистанции/периоды скорректированы по сцен-эвалу (судьи: «пропы слишком далеко
     // и мелко с игровой камеры») — ближе к кербу и чаще; читаемость охраняет xOff≥1.6
     // за кербом + правило «декор не пересекает керб».
-    // Масштабы подняты по фидбеку («маленькие, незаметные»): пропы — заметные объекты
-    // среднего плана, а не миниатюры. Скамейка/будка ориентируются ЛИЦОМ к трассе.
-    const defs = [
-      { name: 'agility-sign',  h: 3.1, period: 130, xOff: 1.8, zones: null },
-      { name: 'flag-cluster',  h: 3.5, period: 105, xOff: 2.2, zones: null },
-      { name: 'water-station', h: 1.35, period: 145, xOff: 1.6, zones: null },
-      { name: 'score-board',   h: 2.6, period: 180, xOff: 2.4, zones: ['stadium', 'park'] },
-      { name: 'judge-booth',   h: 3.2, period: 220, xOff: 3.0, zones: ['stadium', 'night'] },
-      { name: 'camera-tower',  h: 4.6, period: 280, xOff: 3.4, zones: ['stadium', 'night'] },
-      { name: 'food-cart',     h: 2.7, period: 205, xOff: 3.2, zones: ['park', 'sunset'] },
-      { name: 'park-bench',    h: 1.15, period: 110, xOff: 1.7, zones: ['park', 'sunset'] },
-      { name: 'dog-statue',    h: 2.4, period: 360, xOff: 2.2, zones: null },
-      { name: 'podium',        h: 1.4, period: 450, xOff: 2.6, zones: null },
+    // Осмысленные КОМПОЗИЦИИ (фидбек: «одиночные пропы теряются»): пропы стоят
+    // сюжетными кластерами — судейский пост, зрительский уголок, медиа-точка,
+    // церемония, вход. Кластер занимает слот каждые ~80 м, состав по зоне.
+    // rot — поправка фронта конкретной модели (у скамейки фронт был спинкой).
+    const PROPS = {
+      'agility-sign':  { h: 3.6,  rot: 0 },
+      'flag-cluster':  { h: 4.0,  rot: 0 },
+      'water-station': { h: 1.6,  rot: 0 },
+      'score-board':   { h: 3.1,  rot: 0 },
+      'judge-booth':   { h: 3.8,  rot: 0 },
+      'camera-tower':  { h: 5.4,  rot: 0 },
+      'food-cart':     { h: 3.2,  rot: 0 },
+      'park-bench':    { h: 1.4,  rot: Math.PI }, // фронт модели — спинка: разворот
+      'dog-statue':    { h: 2.9,  rot: 0 },
+      'podium':        { h: 1.7,  rot: 0 },
+    };
+    // items: [имя, dxНаружу(м от базовой линии), dzВдоль(м), rotДоп]
+    const CLUSTERS = [
+      { key: 'judge',    zones: ['stadium', 'night'],  items: [['judge-booth', 0, 0, 0], ['flag-cluster', 2.4, 3.2, 0.25], ['water-station', -0.6, -3.4, 0]] },
+      { key: 'media',    zones: ['stadium', 'night'],  items: [['camera-tower', 1.6, 0, 0], ['score-board', -0.4, 4.2, -0.15]] },
+      { key: 'spect',    zones: ['park', 'sunset'],    items: [['park-bench', 0, 0, 0], ['park-bench', 0.4, 2.6, 0.12], ['food-cart', 3.0, -2.8, 0.2]] },
+      { key: 'rest',     zones: ['park', 'sunset'],    items: [['park-bench', 0, 0, 0], ['water-station', 0.6, 2.2, 0], ['agility-sign', 2.2, -2.6, 0]] },
+      { key: 'ceremony', zones: null,                  items: [['podium', 0, 0, 0], ['dog-statue', 2.6, 3.0, 0.35], ['flag-cluster', 2.2, -3.2, -0.2]] },
+      { key: 'entry',    zones: null,                  items: [['agility-sign', 0, 0, 0], ['flag-cluster', 1.8, 2.4, 0]] },
     ];
-    this.genProps = [];
-    this._genPropM = new THREE.Matrix4();
+    this.genClusters = CLUSTERS;
+    this.genPropDefs = PROPS;
+    this.genPropPool = {}; // имя -> [{root,yBase,busy}]
     import('three/addons/loaders/GLTFLoader.js').then(({ GLTFLoader }) => {
       const loader = new GLTFLoader();
-      defs.forEach((def, di) => {
-        loader.load(`./assets/gen/${def.name}.glb`, (gltf) => {
+      Object.entries(PROPS).forEach(([name, def]) => {
+        loader.load(`./assets/gen/${name}.glb`, (gltf) => {
           const proto = gltf.scene;
-          // Нормировка: масштаб к целевой высоте, опора на y=0
           const box = new THREE.Box3().setFromObject(proto);
           const size = box.getSize(new THREE.Vector3());
           const k = def.h / Math.max(0.01, size.y);
-          // 2 клона на тип — рециклируются вперёд по слотам
-          for (let c = 0; c < 2; c++) {
+          this.genPropPool[name] = [];
+          for (let c = 0; c < 4; c++) { // до 2 кластеров в окне × до 2 использований типа
             const inst = proto.clone(true);
             inst.scale.setScalar(k);
             inst.visible = false;
             this.scene.add(inst);
-            this.genProps.push({ def, di, c, root: inst, yBase: -box.min.y * k });
+            this.genPropPool[name].push({ root: inst, yBase: -box.min.y * k, rot: def.rot });
           }
-        }, undefined, () => { /* файл недоступен — проп просто не появится */ });
+        }, undefined, () => { /* файл недоступен — проп не появится */ });
       });
       this._genPropsPeriodMul = D;
+      this.genProps = [{ ready: true }]; // маркер «пул активен» для внешних проверок
     });
   }
 
   _updateGenProps(dogZ, dist) {
-    if (!this.genProps || !this.genProps.length) return;
+    if (!this.genPropPool) return;
     const D = this._genPropsPeriodMul || 1;
+    const STEP = 80 * D; // слот кластера
     const zone = this.currentZone;
-    for (const p of this.genProps) {
-      const period = p.def.period * D;
-      // Слот c-того клона: чередуем вперёд (клон 0 — ближний слот, клон 1 — следующий)
-      const slot = Math.floor(dist / period) + p.c;
-      const h = this._slotHash(slot * 13 + p.di * 101);
-      const side = h > 0.5 ? 1 : -1;
-      const zoneOk = !p.def.zones || p.def.zones.includes(zone);
-      if (!zoneOk) { p.root.visible = false; continue; }
-      const z = dogZ - (slot * period + h * period * 0.5 - dist);
-      // Показываем только впереди в разумном окне (за туманом всё равно не видно)
-      const rel = dogZ - z;
-      p.root.visible = rel > -30 && rel < 170;
-      if (!p.root.visible) continue;
-      p.root.position.set(side * (TRACK_HALF + p.def.xOff + h * 1.4), p.yBase, z);
-      // Фронт GLB смотрит в +Z (front-вид развёртки). Разворачиваем лицом К ТРАССЕ:
-      // справа (side=1) — фронт в −X (rotY −π/2), слева — в +X (rotY +π/2), ±вариация.
-      p.root.rotation.y = side * -(Math.PI / 2) + (h - 0.5) * 0.4;
+    // Сначала прячем все клоны, затем расставляем нужные (окно: 2-3 слота впереди)
+    for (const arr of Object.values(this.genPropPool)) for (const p of arr) { p._used = false; }
+    const baseSlot = Math.floor(dist / STEP);
+    for (let sOff = 0; sOff < 3; sOff++) {
+      const slot = baseSlot + sOff;
+      const h = this._slotHash(slot * 17 + 5);
+      // Кластер по слоту: только подходящие текущей зоне (фиксируется на момент показа)
+      const fit = this.genClusters.filter(c => !c.zones || c.zones.includes(zone));
+      if (!fit.length) continue;
+      const cl = fit[Math.floor(h * fit.length) % fit.length];
+      const side = (slot % 2 === 0) ? 1 : -1;
+      const zBase = dogZ - (slot * STEP + h * STEP * 0.35 - dist);
+      const rel = dogZ - zBase;
+      if (rel < -40 || rel > 170) continue;
+      const xBase = TRACK_HALF + 1.9 + h * 1.2;
+      for (const [name, dxOut, dz, rotAdd] of cl.items) {
+        const pool = this.genPropPool[name];
+        if (!pool) continue;
+        const inst = pool.find(p => !p._used);
+        if (!inst) continue;
+        inst._used = true;
+        inst.root.visible = true;
+        inst.root.position.set(side * (xBase + dxOut), inst.yBase, zBase + dz);
+        // Лицом к трассе: фронт GLB = +Z (front-вид развёртки); справа −π/2, слева +π/2,
+        // плюс поправка модели (rot) и композиционная вариация (rotAdd)
+        inst.root.rotation.y = side * -(Math.PI / 2) + inst.rot + rotAdd + (h - 0.5) * 0.25;
+      }
     }
+    for (const arr of Object.values(this.genPropPool)) for (const p of arr) { if (!p._used) p.root.visible = false; }
   }
+
 
   // Juice (#27, F5): уплотнение среднего плана — recycle-пул боковых пропов
   // (соревновательные флажки + судейские стойки). Два InstancedMesh — почти
@@ -648,7 +676,8 @@ export class World {
 
   _writeStandStaticMatrices(index) {
     const marker = this.stands[index];
-    const { x, y, z } = marker.position;
+    const { x, z } = marker.position;
+    const y = marker.position.y - (marker.userData.on === 0 ? 60 : 0); // off-блок утоплен
     const side = marker.userData.side;
     const batches = this.standBatches;
     this._setBatchInstanceMatrix(batches.base, index, x, y + 1.2, z);
@@ -661,7 +690,8 @@ export class World {
 
   _writeStandCrowdMatrix(index) {
     const marker = this.stands[index];
-    const { x, y, z } = marker.position;
+    const { x, z } = marker.position;
+    const y = marker.position.y - (marker.userData.on === 0 ? 60 : 0); // off-блок утоплен
     const side = marker.userData.side;
     let breathingY = y + 1.95 + Math.abs(Math.sin(this.time * 3 + index * 1.7)) * 0.06;
     if (this.cheerT > 0) {
@@ -1055,17 +1085,23 @@ export class World {
       const marker = this.stands[i];
       if (marker.position.z > dogZ + 30) {
         marker.position.z -= 28 * 6;
+        marker.userData.on = (this.currentZone === 'stadium' || this.currentZone === 'night') ? 1 : 0;
+        this._writeStandStaticMatrices(marker.userData.index);
         this._writeStandStaticMatrices(i);
         standRecycled = true;
       }
     }
-    this.standBatchRoot.visible = this.currentZone === 'stadium' || this.currentZone === 'night';
+    // Плавный переход зон: трибуны не выключаем разом — блок гаснет только когда
+    // рециклится за спиной (утапливаем матрицу), новые в чужой зоне не появляются.
+    this.standBatchRoot.visible = true;
     if (standRecycled) this._markStandStaticMatricesUpdated();
     this._syncStandCrowdMatrices();
     if (standRecycled) this._updateStandBatchBounds();
     for (const tr of this.trees) {
-      if (tr.position.z > dogZ + 26) tr.position.z -= 26 * 14;
-      tr.visible = (this.currentZone === 'park' || this.currentZone === 'sunset');
+      if (tr.position.z > dogZ + 26) {
+        tr.position.z -= 26 * 14;
+        tr.visible = (this.currentZone === 'park' || this.currentZone === 'sunset');
+      }
       // лёгкое покачивание кроны
       tr.rotation.z = Math.sin(this.time * 1.3 + tr.position.z) * 0.02;
     }
@@ -1083,15 +1119,19 @@ export class World {
       this._updateBannerBatchBounds();
     }
     for (const f of this.floodlights) {
-      if (f.position.z > dogZ + 30) f.position.z -= 90 * 4;
-      f.visible = this.currentZone === 'night';
+      if (f.position.z > dogZ + 30) {
+        f.position.z -= 90 * 4;
+        f.visible = this.currentZone === 'night';
+      }
     }
     for (const h of this.hills) {
       if (h.position.z > dogZ + 60) h.position.z -= 60 * 10;
     }
     for (const t of this.tents) {
-      if (t.position.z > dogZ + 26) t.position.z -= 52 * 6;
-      t.visible = (this.currentZone === 'park' || this.currentZone === 'sunset');
+      if (t.position.z > dogZ + 26) {
+        t.position.z -= 52 * 6;
+        t.visible = (this.currentZone === 'park' || this.currentZone === 'sunset');
+      }
     }
     // Арки-ворота
     for (const a of this.arches) {

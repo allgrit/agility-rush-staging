@@ -571,6 +571,35 @@ export function buildCart(lane, z) {
   return { kind: 'cart', hazard: true, lethal: true, lane, z, group: g, halfW: 0.8, halfD: 0.55, height: 1.9, resolved: false, update() {} };
 }
 
+// Стог сена — летальная помеха (вариант тележки): два фасеточных тюка с перевязью.
+// Тематично аджилити-празднику; коллизия идентична cart (halfW/height/lethal).
+export function buildHay(lane, z) {
+  const g = new THREE.Group();
+  const straw = std(0xd8a83c, { roughness: 0.95 });
+  const strap = std(0x8a5f30, { roughness: 0.9 });
+  const b1 = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.75, 1.0), straw);
+  b1.position.y = 0.375;
+  const b2 = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.7, 0.9), straw);
+  b2.position.set(0.06, 1.1, -0.03);
+  b2.rotation.y = 0.14;
+  for (const [bx, bw] of [[-0.4, 0.09], [0.4, 0.09]]) {
+    const s1 = new THREE.Mesh(new THREE.BoxGeometry(bw, 0.77, 1.02), strap);
+    s1.position.set(bx, 0.375, 0);
+    const s2 = new THREE.Mesh(new THREE.BoxGeometry(bw, 0.72, 0.92), strap);
+    s2.position.set(bx + 0.06, 1.1, -0.03);
+    s2.rotation.y = 0.14;
+    g.add(s1, s2);
+  }
+  g.add(b1, b2);
+  g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  g.position.set(LANE_X[lane], 0, z);
+  return {
+    kind: 'hay', lane, z, group: g, resolved: false,
+    hazard: true, lethal: true, halfW: 0.8, height: 1.5,
+    update() { /* статичен */ },
+  };
+}
+
 export function buildFence(lanes, z) {
   // Ограждение на 1–2 полосы
   const g = new THREE.Group();

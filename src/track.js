@@ -1,6 +1,6 @@
 import {
   buildHurdle, buildTire, buildTunnel, buildWeave, buildAFrame,
-  buildDogwalk, buildSeesaw, buildTable, buildCart, buildFence,
+  buildDogwalk, buildSeesaw, buildTable, buildCart, buildHay, buildFence,
   buildCone, buildPuddle, buildSprinkler, buildCookie, buildPowerup,
   buildPodium, buildRecordFlag, buildToken, buildLetter,
 } from './obstacles.js';
@@ -133,7 +133,7 @@ export class Track {
         // Breadcrumbs: низкая дорожка косточек внутри тоннеля — «пригнись и держи полосу»
         for (let c = 0; c < 4; c++) this._add(buildCookie(mainLane, z - 13 - c * 1.4, 0.32));
         const other = (mainLane + rng.pick([1, 2])) % 3;
-        if (rng.chance((0.4 + diff * 0.4) * ease)) this._add(buildCart(other, z - 15));
+        if (rng.chance((0.4 + diff * 0.4) * ease)) this._add(rng.chance(0.35) ? buildHay(other, z - 15) : buildCart(other, z - 15));
         this._cookieLine(mainLane, z - 22, 5);
       },
       weave: () => {
@@ -162,7 +162,7 @@ export class Track {
       tire: () => {
         this._add(buildTire(mainLane, z - 10));
         this._cookieArc(mainLane, z - 10);
-        if (rng.chance(diff * 0.9 * ease)) this._add(buildCart((mainLane + 1) % 3, z - 10));
+        if (rng.chance(diff * 0.9 * ease)) this._add(rng.chance(0.35) ? buildHay((mainLane + 1) % 3, z - 10) : buildCart((mainLane + 1) % 3, z - 10));
       },
       table: () => {
         this._add(buildTable(mainLane, z - 10));
@@ -173,7 +173,7 @@ export class Track {
         const safe = rng.int(0, 2);
         for (const l of lanes) {
           if (l === safe) continue;
-          if (rng.chance(0.75 * ease)) this._add(rng.chance(0.5) ? buildCart(l, z - 12) : buildFence([l], z - 12));
+          if (rng.chance(0.75 * ease)) this._add(rng.chance(0.5) ? (rng.chance(0.3) ? buildHay(l, z - 12) : buildCart(l, z - 12)) : buildFence([l], z - 12));
         }
         if (rng.chance(0.6)) {
           this._add(buildHurdle(safe, z - 12));
