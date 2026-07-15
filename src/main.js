@@ -149,6 +149,12 @@ if (/^(localhost|127\.)/.test(location.hostname) && params.has('give')) {
   game.meta.save();
 }
 
+// На ПК (мышь/hover) показываем на подписи кнопки хоткей «E»
+const tugCap = document.getElementById('tug-cap');
+if (tugCap && window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches) {
+  tugCap.textContent = 'Пуллер · E';
+}
+
 // Кнопка активации расходника «Тягач» (тап по ходу забега)
 const tugBtn = document.getElementById('tug-btn');
 if (tugBtn) tugBtn.addEventListener('click', (e) => {

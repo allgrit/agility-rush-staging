@@ -827,8 +827,8 @@ export class UI {
       const vis = cnt > 0 || active;
       if (vis !== h.tugVis) { h.tugVis = vis; tugBox.style.display = vis ? 'flex' : 'none'; }
       if (vis) {
-        // Активен — показываем ОТСЧЁТ секунд; иначе — количество зарядов.
-        const label = active ? Math.ceil(state.tugT || 0) + 'с' : String(cnt);
+        // Кнопка показывает ЧИСЛО пуллеров (не время — время только у иконки эффекта слева вверху).
+        const label = String(cnt);
         if (label !== h.tugLbl) { h.tugLbl = label; tugBtn.querySelector('b').textContent = label; }
         if (active !== h.tugOn) { h.tugOn = active; tugBtn.classList.toggle('on', active); }
         const off = cnt <= 0 && !active;
