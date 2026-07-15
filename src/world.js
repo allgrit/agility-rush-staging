@@ -484,7 +484,12 @@ export class World {
             inst.scale.setScalar(k);
             inst.visible = false;
             this.scene.add(inst);
-            this.genPropPool[name].push({ root: inst, yBase: -box.min.y * k, rot: def.rot });
+            this.genPropPool[name].push({
+              root: inst, yBase: -box.min.y * k, rot: def.rot,
+              // Полуширина по X ПОСЛЕ разворота к трассе: берём максимум габаритов XZ —
+              // именно свисающие части (флаги на шесте) въезжали в трибуны при капе по центру
+              halfXZ: Math.max(size.x, size.z) * k / 2,
+            });
           }
         }, undefined, () => { /* файл недоступен — проп не появится */ });
       });
@@ -516,7 +521,10 @@ export class World {
       // Трибуны: центр на ±(TRACK_HALF+4.4), глубина 2.6 → передняя грань ≈ ±7.3.
       // В зонах с трибунами пропы не заходят за неё (иначе пересечения с блоками).
       const standsOn = zone === 'stadium' || zone === 'night';
-      const maxX = standsOn ? TRACK_HALF + 2.9 : TRACK_HALF + 5.5;
+      // Юбка трибуны выступает к трассе до ~±6.9 (центр 8.6 − skirt 1.5 − толщина):
+      // внешний КРАЙ пропа не дальше 6.8. Крупные пропы, не влезающие в коридор,
+      // скипаются здесь автоматически (см. проверку ниже) — их место в парке/закате.
+      const maxX = standsOn ? TRACK_HALF + 2.6 : TRACK_HALF + 5.5;
       const placed = []; // анти-пересечения внутри кластера: {z, r}
       for (const [name, dxOut, dz, rotAdd] of cl.items) {
         const pool = this.genPropPool[name];
@@ -525,7 +533,13 @@ export class World {
         if (!inst) continue;
         inst._used = true;
         inst.root.visible = true;
-        const px = side * Math.min(xBase + dxOut, maxX);
+        const hw = inst.halfXZ || 1;
+        // Наружная граница минус полуширина (края пропа не пересекают трибуну),
+        // внутренняя — керб плюс полуширина (не нависает над трассой)
+        const pxAbs = Math.max(TRACK_HALF + 0.6 + hw, Math.min(xBase + dxOut, maxX - hw));
+        // Если коридор уже, чем проп (maxX-hw < керб+hw) — пропу здесь не место
+        if (maxX - hw < TRACK_HALF + 0.6 + hw) { inst._used = true; inst.root.visible = false; continue; }
+        const px = side * pxAbs;
         // Радиус пропа ~ треть высоты; раздвигаем по z при конфликте (до 3 шагов)
         const r = Math.max(0.8, (this.genPropDefs[name].h || 2) * 0.35);
         let pz = zBase + dz;
