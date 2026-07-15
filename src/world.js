@@ -1207,15 +1207,18 @@ export class World {
       const lampMat = new THREE.MeshBasicMaterial({ color: 0xfff8d0 });
       const head = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.7, 0.3), lampMat);
       head.position.set(-s * 0.5, 8, 0);
-      head.rotation.z = s * 0.5;
+      head.rotation.z = -s * 0.35; // панель наклонена К трассе (знак был от неё)
       mast.add(head);
       // Световой конус (аддитивный) и пятно на трассе
       const cone = new THREE.Mesh(
         new THREE.ConeGeometry(3.2, 8.5, 12, 1, true),
         new THREE.MeshBasicMaterial({ color: 0xfff2c0, transparent: true, opacity: 0.09, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false })
       );
+      // Вершина конуса обязана совпадать с лампой (−0.5s, 8), основание — с пятном
+      // на трассе (−4.6s, 0): наклон −0.47s. Прежний +0.42s вершил конус в воздухе
+      // в 4 м от фонаря («свет идёт не от фонаря»).
       cone.position.set(-s * 2.6, 4.2, 0);
-      cone.rotation.z = s * 0.42;
+      cone.rotation.z = -s * 0.47;
       mast.add(cone);
       const pool = new THREE.Mesh(
         new THREE.CircleGeometry(3.4, 20),
@@ -1225,6 +1228,7 @@ export class World {
       pool.position.set(-s * 4.6, 0.02, 0);
       mast.add(pool);
       mast.position.set(s * (TRACK_HALF + 5.5), 0, -i * 90 - 20);
+      mast.visible = false; // ночной реквизит: до первого рецикла не торчит днём
       mast.userData.z0 = mast.position.z;
       this.scene.add(mast);
       this.floodlights.push(mast);
