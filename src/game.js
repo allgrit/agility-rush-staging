@@ -239,7 +239,12 @@ export class Game {
         else this.meta.buyDog(key);
         this._setDog(this.meta.data.selectedDog);
       }
-    );
+    ,
+      () => { // «🎓 обучение» из меню: тутор заново с 1-го шага
+        this.meta.data.ftueStage = 0;
+        this._ftueForce = true;
+        this.startRun();
+      });
     this._placeDogAtStart();
   }
 
@@ -1527,7 +1532,9 @@ export class Game {
     const force = qs.get('ftue');
     const harness = qs.has('harness');
     // В харнессе обучение выключено (детерминизм гейтов), если не запрошено явно ?ftue=1
-    const want = force === '1' ? true : force === '0' ? false : (!this.meta.data.ftueDone && !harness);
+    const want = this._ftueForce ? true
+      : force === '1' ? true : force === '0' ? false : (!this.meta.data.ftueDone && !harness);
+    this._ftueForce = false;
     if (!want) { this.ftue = null; return; }
     this.track.disabled = true;
     this.ftue = {
@@ -1538,6 +1545,21 @@ export class Game {
     };
     this._ftueWallsEnsure();
     this.ui.showFtueBanner('ОБУЧЕНИЕ', 'Слушай тренера — и на трассу!');
+    this.ui.showFtueSkip(() => this._ftueSkip());
+  }
+
+  // Явный пропуск: обучение выключается насовсем, забег продолжается с нуля сложности
+  _ftueSkip() {
+    if (!this.ftue) return;
+    track('ftue_skip', { i: this.ftue.idx });
+    this.meta.data.ftueDone = true;
+    this.meta.data.ftueStage = 0;
+    this.meta.save();
+    this.score = 0;
+    this.combo = 0;
+    this._ftueClearTargets();
+    this._ftueStop();
+    this.popups.custom('Удачи на трассе!', 'scorepop', 50, 40);
   }
 
   _ftueStop() {
@@ -1546,6 +1568,7 @@ export class Game {
     this.track.disabled = false;
     this.ui.hideFtueBanner();
     this.ui.hideTutHint();
+    this.ui.hideFtueSkip();
     if (this._ftueWalls) for (const w of this._ftueWalls) w.visible = false;
   }
 
@@ -1758,6 +1781,7 @@ export class Game {
     this.score = 0;
     this.combo = 0;
     this.cookieStreak = 0;
+    this.ui.hideFtueSkip();
     this.ui.showFtueBanner('ОБУЧЕНИЕ ПРОЙДЕНО! 🎉', '+100 🦴 — а теперь настоящий забег!');
     this.popups.custom('+100 🦴', 'scorepop', 50, 36);
     this.audio.fanfare ? this.audio.fanfare() : this.audio.perfect(3);

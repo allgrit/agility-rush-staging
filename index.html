@@ -8,8 +8,8 @@
   // Bootstrap-версия: index.html грузится всегда свежим (network-first / без SW),
   // поэтому знает актуальную сборку. Если у игрока в кэше старьё — один раз чистим
   // все кэши, разрегистрируем старый SW и перезагружаемся. Разрывает «залипание» SW.
-  window.__BUILD = 'staging-v43-ftue-signs';
-  window.__CACHE = 'agility-staging-v43'; // должно совпадать с VERSION в sw.js
+  window.__BUILD = 'staging-v44-ftue-skip';
+  window.__CACHE = 'agility-staging-v44'; // должно совпадать с VERSION в sw.js
   (function () {
     try {
       var qs = new URLSearchParams(location.search);
@@ -331,6 +331,21 @@
   .shop-close { margin-top: 12px; }
   /* Обучение — большая белая полупрозрачная лапа-жест поверх экрана (стиль Subway Surfers).
      Одна лапа делает понятное движение: вверх/вниз/вбок/тап-в-ритм. Без текста и карточек. */
+  #ftue-skip {
+    /* по центру ПОД баннером этапа: справа сверху перекрывался с ним на узких экранах */
+    position: absolute; top: calc(9% + 84px); left: 50%; transform: translateX(-50%);
+    z-index: 31; display: none;
+    background: rgba(10, 16, 30, 0.66); color: #b8c6de; border: 1px solid #3a4a68;
+    border-radius: 12px; padding: 8px 14px; font: 700 13px/1 inherit; cursor: pointer;
+    white-space: nowrap;
+  }
+  #ftue-skip:hover { color: #eaf2ff; }
+  #ftue-skip:active { transform: translateX(-50%) scale(0.96); }
+  .ftue-menu-btn {
+    margin-left: 10px; background: none; border: 1px solid #3a4a68; border-radius: 10px;
+    color: #9fb4d8; font: 700 12px/1 inherit; padding: 5px 10px; cursor: pointer;
+    vertical-align: middle;
+  }
   #ftue-banner {
     position: absolute; top: 9%; left: 50%; transform: translateX(-50%);
     display: none; flex-direction: column; align-items: center; gap: 4px;
@@ -795,6 +810,7 @@
     <div id="shop"></div>
     <div id="tut-hint"></div>
     <div id="ftue-banner"></div>
+    <button id="ftue-skip">Пропустить обучение ›</button>
     <div id="update-banner">Доступно обновление игры <button id="update-apply">Обновить</button></div>
     <div id="mission-toast"></div>
   </div>

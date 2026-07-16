@@ -41,7 +41,7 @@ export class UI {
     this._displayScore = 0;
   }
 
-  showMenu(onStart, onSelectDog) {
+  showMenu(onStart, onSelectDog, onFtue) {
     this.hud.style.display = 'none';
     this.overEl.style.display = 'none';
     this.menuEl.style.display = 'flex';
@@ -91,7 +91,8 @@ export class UI {
           }).join('')}
         </div>
         <button class="start-btn" id="start-btn">СТАРТ</button>
-        <div class="controls-hint">← → полосы · ↑ прыжок · ↓ подкат</div>
+        <div class="controls-hint">← → полосы · ↑ прыжок · ↓ подкат
+          <button class="ftue-menu-btn" id="ftue-menu-btn">🎓 обучение</button></div>
         <div class="meta-scroll">
         <!-- Панель «Задания»: миссии + слово дня + дейлики -->
         <div class="meta-panel on" data-panel="quests">
@@ -165,7 +166,10 @@ export class UI {
     // (gift/ник/собака) переоткрывают меню через this._onStart/_onSelectDog.
     this._onStart = onStart;
     this._onSelectDog = onSelectDog;
+    this._onFtue = onFtue || this._onFtue;
     this.menuEl.querySelector('#start-btn').addEventListener('click', onStart);
+    const ftueBtn = this.menuEl.querySelector('#ftue-menu-btn');
+    if (ftueBtn) ftueBtn.addEventListener('click', () => { track('ftue_menu_click', {}); this._onFtue && this._onFtue(); });
     this.menuEl.querySelectorAll('.diary-link').forEach(el => el.addEventListener('click', () => track('diary_click', { from: 'menu' })));
     // Tap-to-play (парадигма SS): клик по баннеру = старт забега
     const heroPlay = this.menuEl.querySelector('#hero-play');
@@ -226,7 +230,7 @@ export class UI {
           this.showOnlineRank(r.rank);
         }
       }
-      this.showMenu(this._onStart, this._onSelectDog);
+      this.showMenu(this._onStart, this._onSelectDog, this._onFtue);
     });
     // Асинхронно подгружаем реальный онлайн-топ (fallback — локальные боты уже показаны)
     this._loadOnlineTop();
@@ -246,7 +250,7 @@ export class UI {
           const row = this.menuEl.querySelector('#gift-row');
           row.innerHTML = `<span class="gift-won">🎉 +${amount} 🦴!</span>`;
           // Обновляем счётчик печенек в статистике
-          setTimeout(() => this.showMenu(this._onStart, this._onSelectDog), 1400);
+          setTimeout(() => this.showMenu(this._onStart, this._onSelectDog, this._onFtue), 1400);
         }
       });
     }
@@ -259,7 +263,7 @@ export class UI {
         track('week_claim', { day: r.dayIdx, amount: r.amount, item: r.bonusItem ? r.bonusItem.id : '' });
         const itemName = r.bonusItem ? (itemOf(r.bonusItem.slot, r.bonusItem.id) || {}).name : null;
         weekBtn.outerHTML = `<div class="week-done">🎉 +${r.amount} 🦴${itemName ? ` + бандана «${itemName}»!` : '!'}</div>`;
-        setTimeout(() => this.showMenu(this._onStart, this._onSelectDog), 1600); // таб восстановится сам
+        setTimeout(() => this.showMenu(this._onStart, this._onSelectDog, this._onFtue), 1600); // таб восстановится сам
       });
     }
     // Клеймы ачивок (кнопки в панели «Ачивки»)
@@ -758,6 +762,19 @@ export class UI {
   hideFtueBanner() {
     const el = document.getElementById('ftue-banner');
     if (el) el.style.display = 'none';
+  }
+
+  // Кнопка «Пропустить обучение»: видна весь тутор, обработчик задаёт game
+  showFtueSkip(onSkip) {
+    const el = document.getElementById('ftue-skip');
+    if (!el) return;
+    el.style.display = 'block';
+    el.onclick = () => { onSkip && onSkip(); };
+  }
+
+  hideFtueSkip() {
+    const el = document.getElementById('ftue-skip');
+    if (el) { el.style.display = 'none'; el.onclick = null; }
   }
 
   hideTutHint() {
