@@ -30,8 +30,6 @@ export class UI {
     this.cookieEl = document.getElementById('cookies');
     this.comboEl = document.getElementById('combo');
     this.comboFill = document.getElementById('combo-fill');
-    this.chainEl = document.getElementById('chain');
-    this.chainTxt = document.getElementById('chain-txt');
     this.powerupsEl = document.getElementById('powerups');
     this.menuEl = document.getElementById('menu');
     this.overEl = document.getElementById('gameover');
@@ -742,10 +740,24 @@ export class UI {
   showTutHint(name, dir, label, isTouch) {
     const el = document.getElementById('tut-hint');
     if (!el) return;
+    // Лапа + ТЕКСТ ЖЕСТА всегда (FTUE-аудит: жест без слов новичок трактует неверно)
     el.innerHTML = isTouch
-      ? `<img class="th-paw th-${dir}" src="./assets/paw-hint.png" alt="">`
+      ? `<img class="th-paw th-${dir}" src="./assets/paw-hint.png" alt=""><div class="th-label">${this._esc(label)}</div>`
       : `<div class="th-keys th-${dir}">${this._esc(label)}</div>`;
     el.style.display = 'flex';
+  }
+
+  // Баннер блокирующего обучения: крупный заголовок шага + подсказка, вверху экрана
+  showFtueBanner(title, sub) {
+    let el = document.getElementById('ftue-banner');
+    if (!el) return;
+    el.innerHTML = `<div class="fb-title">${this._esc(title)}</div><div class="fb-sub">${this._esc(sub)}</div>`;
+    el.style.display = 'flex';
+  }
+
+  hideFtueBanner() {
+    const el = document.getElementById('ftue-banner');
+    if (el) el.style.display = 'none';
   }
 
   hideTutHint() {
@@ -794,13 +806,6 @@ export class UI {
       this.comboFill.style.width = Math.min(100, state.comboFresh * 100) + '%';
       const hot = state.combo >= 10;
       if (hot !== h.comboHot) { h.comboHot = hot; this.comboEl.classList.toggle('hot', hot); }
-    }
-    // «Связка» (F2): пилюля прогресса n/len, пока игрок внутри активной связки (диффим)
-    const chainVis = state.chainN > 0;
-    if (chainVis !== !!h.chainVis) { h.chainVis = chainVis; this.chainEl.style.display = chainVis ? 'block' : 'none'; }
-    if (chainVis) {
-      const ct = state.chainN + '/' + state.chainLen;
-      if (ct !== h.chainTxt) { h.chainTxt = ct; this.chainTxt.textContent = '🔗 СВЯЗКА ' + ct; }
     }
     // Пауэрапы: ПОСТОЯННЫЕ узлы (создаём один раз), меняем только видимость и ширину полоски —
     // без пересборки innerHTML каждый кадр.

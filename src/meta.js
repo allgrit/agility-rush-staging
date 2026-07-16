@@ -70,7 +70,6 @@ const MISSION_TYPES = [
   { key: 'tables',          base: 2,    step: 1,   text: (t) => `${t} стола за забег`,               rw: (t) => 140 + t * 20 },
   { key: 'cleanStreakDist', base: 700,  step: 300, text: (t) => `${t} м без фолтов`,                 rw: (t) => 160 + Math.floor(t / 10) },
   { key: 'powerups',        base: 3,    step: 2,   text: (t) => `${t} пауэрапа за забег`,            rw: (t) => 120 + t * 10 },
-  { key: 'chains',          base: 3,    step: 2,   text: (t) => `${t} связки за забег`,              rw: (t) => 130 + t * 15 },
 ];
 
 // Миссия по порядковому номеру: типы циклятся, цель растёт с каждым полным кругом.
@@ -160,6 +159,7 @@ export class Meta {
 
   // Миграция старых сохранений на бесконечные миссии (раньше был конечный пул из 10).
   _migrate(d) {
+    if (d.ftueDone === undefined) d.ftueDone = (d.runs || 0) > 0;
     // Устойчивость к частичным/битым сейвам: базовые поля добираем дефолтами,
     // иначе повреждённый localStorage кладёт игру на старте (crash в showMenu).
     d.cookies = d.cookies || 0;

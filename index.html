@@ -8,8 +8,8 @@
   // Bootstrap-версия: index.html грузится всегда свежим (network-first / без SW),
   // поэтому знает актуальную сборку. Если у игрока в кэше старьё — один раз чистим
   // все кэши, разрегистрируем старый SW и перезагружаемся. Разрывает «залипание» SW.
-  window.__BUILD = 'staging-v49-2026-07-16';
-  window.__CACHE = 'agility-staging-v49'; // должно совпадать с VERSION в sw.js
+  window.__BUILD = 'staging-v42-ftue';
+  window.__CACHE = 'agility-staging-v42'; // должно совпадать с VERSION в sw.js
   (function () {
     try {
       var qs = new URLSearchParams(location.search);
@@ -331,14 +331,32 @@
   .shop-close { margin-top: 12px; }
   /* Обучение — большая белая полупрозрачная лапа-жест поверх экрана (стиль Subway Surfers).
      Одна лапа делает понятное движение: вверх/вниз/вбок/тап-в-ритм. Без текста и карточек. */
+  #ftue-banner {
+    position: absolute; top: 9%; left: 50%; transform: translateX(-50%);
+    display: none; flex-direction: column; align-items: center; gap: 4px;
+    background: rgba(10, 16, 30, 0.82); border: 2px solid #ffd23f; border-radius: 16px;
+    padding: 10px 22px; z-index: 30; pointer-events: none; text-align: center;
+    max-width: 86vw; box-shadow: 0 6px 22px rgba(0,0,0,.45);
+  }
+  #ftue-banner .fb-title { font-weight: 900; font-size: 19px; color: #ffd23f; letter-spacing: .6px; }
+  #ftue-banner .fb-sub { font-weight: 700; font-size: 15px; color: #eaf2ff; }
+  .th-label {
+    margin-top: 6px; font-weight: 900; font-size: 24px; color: #fff; letter-spacing: .5px;
+    text-shadow: 0 2px 0 #1c2b4a, 0 4px 14px rgba(0,0,0,.8); text-align: center;
+  }
   #tut-hint {
     position: fixed; inset: 0; display: none; z-index: 25;
+    flex-direction: column; /* лапа/капсула сверху, текст жеста под ними */
     align-items: center; justify-content: center; pointer-events: none;
+    transform: translateY(-13vh); /* выше собаки: не перекрывать снаряд в точке решения */
   }
   .th-paw {
     width: min(200px, 52vw); height: auto;
-    filter: brightness(0) invert(1) drop-shadow(0 4px 12px rgba(0,0,0,0.5));
-    opacity: 0.55; will-change: transform, opacity;
+    /* Жирная тёмная обводка: белая лапа терялась на светлом небе/газоне (FTUE-аудит) */
+    filter: brightness(0) invert(1)
+      drop-shadow(0 0 3px rgba(10,16,30,0.95)) drop-shadow(0 0 10px rgba(10,16,30,0.7))
+      drop-shadow(0 6px 16px rgba(0,0,0,0.6));
+    opacity: 0.92; will-change: transform, opacity;
   }
   .th-up   { animation: pawup 1.2s ease-in-out infinite; }
   .th-down { animation: pawdown 1.2s ease-in-out infinite; }
@@ -417,13 +435,6 @@
   #combo.hot .combo-num { color: #ff9a3d; text-shadow: 0 0 18px rgba(255,120,40,0.8); }
   #combo-bar { width: 110px; height: 7px; background: rgba(255,255,255,0.2); border-radius: 4px; margin-top: 4px; overflow: hidden; }
   #combo-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #ffd587, #ff9a3d); border-radius: 4px; transition: width 0.15s; }
-  /* «Связка» (F2): пилюля прогресса под комбо — видимая комбо-последовательность трассы */
-  #chain {
-    display: none; position: absolute; top: 66px; left: 62px;
-    font-size: 14px; font-weight: 800; color: #8fe6ff; white-space: nowrap;
-    background: rgba(18,48,68,0.5); border: 1px solid rgba(130,215,255,0.55);
-    border-radius: 10px; padding: 3px 9px; text-shadow: 0 1px 4px rgba(0,0,0,0.6);
-  }
   #powerups { position: absolute; top: 92px; left: 62px; display: flex; flex-direction: column; gap: 6px; }
   #powerups .pw { display: flex; align-items: center; gap: 6px; font-size: 20px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5)); }
   #powerups .pw i { display: block; width: 60px; height: 5px; background: linear-gradient(90deg, #9adcff, #4a9ad8); border-radius: 3px; }
@@ -469,8 +480,6 @@
   .popup.clean { font-size: 30px; color: #9adcff; }
   .popup.fault { font-size: 30px; color: #ff7a6e; }
   .popup.combo { font-size: 36px; color: #ffb347; }
-  /* Попап связки: крупный бонус (десятки тысяч) должен влезать по ширине даже на узком экране */
-  .popup.chainpop { font-size: 30px; color: #8fe6ff; -webkit-text-stroke: 1px #0a4a66; text-shadow: 0 3px 12px rgba(0,0,0,0.6); }
   .popup.scorepop { font-size: 30px; color: #ffd75a; -webkit-text-stroke: 1px #7a4a12; text-shadow: 0 3px 12px rgba(0,0,0,0.65); }
   .popup.miss { font-size: 16px; color: #ffb0a8; }
 
@@ -732,7 +741,6 @@
     .popup.perfect { font-size: 34px; }
     .popup.clean, .popup.fault { font-size: 24px; }
     .popup.scorepop { font-size: 24px; }
-    .popup.chainpop { font-size: 22px; }
   }
 
   #update-banner {
@@ -771,7 +779,6 @@
         <div class="combo-num">×2</div>
         <div id="combo-bar"><div id="combo-fill"></div></div>
       </div>
-      <div id="chain"><span id="chain-txt"></span></div>
       <div id="powerups"></div>
       <div id="tug-box" style="display:none">
         <div id="tug-hint">👆</div>
@@ -787,6 +794,7 @@
     <div id="leaderboard"></div>
     <div id="shop"></div>
     <div id="tut-hint"></div>
+    <div id="ftue-banner"></div>
     <div id="update-banner">Доступно обновление игры <button id="update-apply">Обновить</button></div>
     <div id="mission-toast"></div>
   </div>

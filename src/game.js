@@ -30,17 +30,37 @@ const TUT_GESTURE = {
   hurdle:  { name: 'БАРЬЕР',  dir: 'up',   touch: 'СВАЙП ВВЕРХ',  key: '↑ или ПРОБЕЛ' },
   tire:    { name: 'ШИНА',    dir: 'up',   touch: 'СВАЙП ВВЕРХ',  key: '↑ ПРЫЖОК' },
   tunnel:  { name: 'ТОННЕЛЬ', dir: 'down', touch: 'СВАЙП ВНИЗ',   key: '↓ ПОДКАТ' },
-  weave:   { name: 'СЛАЛОМ',  dir: 'tap',  touch: 'ТАПАЙ В РИТМ', key: 'ЖМИ В РИТМ' },
-  aframe:  { name: 'ГОРКА',   dir: 'down', touch: 'ВНИЗ В ЗОНЕ',  key: '↓ В ЗОНЕ' },
+  weave:   { name: 'СЛАЛОМ',  dir: 'tap',  touch: 'ТАП НА КАЖДУЮ СТОЙКУ', key: 'ЖМИ НА КАЖДУЮ СТОЙКУ' },
+  aframe:  { name: 'ГОРКА',   dir: 'down', touch: 'СВАЙП ВНИЗ НА СПУСКЕ',  key: '↓ НА СПУСКЕ' },
   seesaw:  { name: 'КАЧЕЛИ',  dir: 'down', touch: 'ВНИЗ, КОГДА ЛЯЖЕТ', key: '↓ КОГДА ЛЯЖЕТ' },
-  dogwalk: { name: 'БУМ',     dir: 'side', touch: 'НАКЛОНЯЙ ← →', key: '← → БАЛАНС' },
-  table:   { name: 'СТОЛ',    dir: 'up',   touch: 'ЗАСКОЧИ',      key: 'ЗАСКОЧИ' },
+  dogwalk: { name: 'БУМ',     dir: 'side', touch: 'ДЕРЖИ БАЛАНС ← →', key: '← → БАЛАНС' },
+  table:   { name: 'СТОЛ',    dir: 'up',   touch: 'СВАЙП ВВЕРХ — ЗАПРЫГНИ', key: '↑ ЗАПРЫГНИ' },
 };
 // Дистанция (м), на которой всплывает подсказка у ПРЫЖКОВЫХ/подката — чтобы игрок успел
 // среагировать и прыгнуть/присесть вовремя. Контактные и слалом показываются по факту
 // нахождения на них (см. _updateTutorial), поэтому здесь их нет.
 const TUT_RANGE = { hurdle: 6, tire: 6, tunnel: 6, table: 5 };
 const TUT_MAX_SHOWS = 5; // сколько раз максимум показать подсказку типа (если игрок не освоил)
+
+// ============ Блокирующее обучение (FTUE, стиль Subway Surfers) ============
+// Первая игра: снаряды идут по одному, боковые полосы заблокированы, при провале
+// собака ОТКАТЫВАЕТСЯ назад и пробует снова — умереть в обучении нельзя.
+// Подсказка (лапа + текст) показывается ЗАРАНЕЕ, при появлении снаряда.
+// kind 'dodge' — этап перестроения: тележка в полосе собаки, открыта одна соседняя.
+const FTUE_STAGES = [
+  { kind: 'hurdle', title: 'БАРЬЕР' },
+  { kind: 'tunnel', title: 'ТОННЕЛЬ' },
+  { kind: 'dodge', dir: 'right', title: 'ПЕРЕСТРОЕНИЕ' },
+  { kind: 'dodge', dir: 'left', title: 'И ОБРАТНО' },
+  { kind: 'weave', title: 'СЛАЛОМ', needClean: true },
+  { kind: 'tire', title: 'КОЛЬЦО', needClean: true },
+  { kind: 'table', title: 'СТОЛ', needClean: true },
+  { kind: 'aframe', title: 'ГОРКА' },
+  { kind: 'dogwalk', title: 'БУМ' },
+  { kind: 'seesaw', title: 'КАЧЕЛИ' },
+];
+const FTUE_SPEED = 8.4;     // скорость во время обучения — успеть прочитать и среагировать
+const FTUE_SPAWN_AHEAD = 46; // снаряд появляется за столько метров (подсказка сразу)
 
 // Очки. Базовая награда за снаряд привязана к его СЛОЖНОСТИ (по реальной статистике
 // успешных прохождений): чем реже игроки проходят чисто — тем больше очков за риск.
@@ -114,6 +134,7 @@ export class Game {
     let _learned = {};
     try { _learned = JSON.parse(localStorage.getItem('agility_tut_learned') || '{}'); } catch { _learned = {}; }
     this.tutorial = { active: false, count: {}, learned: _learned, curType: null, curTarget: null };
+    this.ftue = null; // активное блокирующее обучение (см. FTUE_STAGES)
     this.timeScale = 1;
     this.slowmoT = 0;
     this._resetRunState();
@@ -171,7 +192,6 @@ export class Game {
     this.distance = 0;
     this.score = 0;
     this.combo = 0;
-    this.chain = null; // активная «Связка» F2: {id, len, cleared, dead} — бонус за полное прохождение
     this.cookieStreak = 0; this.cookieStreakT = 0;
     this.powerups = { magnet: 0, shield: 0, rocket: 0, multi: 0 };
     this.powerupMax = { magnet: 8, shield: 1, rocket: 4.5, multi: 10 };
@@ -183,7 +203,7 @@ export class Game {
     this.runStats = {
       score: 0, distance: 0, cookies: 0, maxCombo: 0, perfects: 0, faults: 0,
       cleanObstacles: 0, cleanHurdles: 0, perfectWeaves: 0, tunnels: 0, tables: 0,
-      powerups: 0, cleanStreakDist: 0, _streakStart: 0, chains: 0,
+      powerups: 0, cleanStreakDist: 0, _streakStart: 0,
       // Счётчики ачивок (накопятся в meta при завершении забега)
       nearMiss: 0, flights: 0, judgeEscapes: 0, revives: 0, nightReached: 0,
     };
@@ -206,6 +226,7 @@ export class Game {
   // ---------- Публичное API ----------
 
   showMenu() {
+    this._ftueStop();
     if (this.pendingReload) return this.pendingReload(); // применить отложенное обновление
     this.state = 'menu';
     this.audio.stopMusic();
@@ -297,6 +318,7 @@ export class Game {
       this.state = 'running';
     }
     this.audio.startMusic();
+    this._ftueMaybeStart();
     // Аналитика: старт забега
     this._runId = (Math.random().toString(36).slice(2, 10));
     this._runIndex = (this._runIndex || 0) + 1;
@@ -399,6 +421,7 @@ export class Game {
 
     // Скорость: база растёт с дистанцией, множители снарядов/бустов
     let target = Math.min(MAX_SPEED, BASE_SPEED + this.distance * 0.012);
+    if (this.ftue) target = this.ftue.phase === 'run' ? Math.min(target, FTUE_SPEED) : 0;
     if (this.speedModT > 0) { this.speedModT -= dt; target *= this.speedMod; }
     if (this.boostT > 0) { this.boostT -= dt; target *= 1.25; }
     if (this.tugT > 0) target *= TUG_SPEED; // тягач тянет вперёд
@@ -418,7 +441,9 @@ export class Game {
 
     // Продвижение
     d.z -= d.speed * dt;
-    this.distance += d.speed * dt;
+    if (!this.ftue) this.distance += d.speed * dt; // тутор не считается пройденной дистанцией
+    if (this.ftue) this._ftueTick(dt);
+    if (this._ftueBannerHideT > 0) { this._ftueBannerHideT -= dt; if (this._ftueBannerHideT <= 0) this.ui.hideFtueBanner(); }
     this._trackProgress();
     this.score += d.speed * dt * (this.powerups.multi > 0 ? 2 : 1) * (this.tableBoostT > 0 ? 2 : 1) * (this.metaMult || 1);
 
@@ -589,9 +614,6 @@ export class Game {
     hs.cookies = this.runStats.cookies;
     hs.combo = this.combo;
     hs.comboFresh = this._comboProgress();
-    // Прогресс активной «Связки» (F2): показываем n/len пока игрок внутри связки (не мёртвой).
-    hs.chainN = (this.chain && !this.chain.dead && this.chain.cleared < this.chain.len) ? this.chain.cleared : 0;
-    hs.chainLen = hs.chainN ? this.chain.len : 0;
     hs.powerups = this.powerups;     // живые ссылки: updateHUD читает поля СРАЗУ и не хранит ссылку
     hs.powerupMax = this.powerupMax; // (безопасно, как и было до диффинга)
     hs.danger = this.judgeT > 0;
@@ -677,6 +699,8 @@ export class Game {
     const d = this.dog;
     while (this.inputQueue.length) {
       const a = this.inputQueue.shift();
+      if (this.ftue && this.ftue.phase !== 'run') continue; // на возврате управление отключено
+      if (this.ftue) this.ftue.acted = true;
       if (d.launchedT > 0 || this.tableT > 0) continue; // управление потеряно
       if (this.weave) {
         // Слалом = ритм-тапы: любое касание/стрелка в открытом окне засчитывается
@@ -695,6 +719,16 @@ export class Game {
         continue;
       }
       if (a === 'tap') { this._jump(); continue; }
+      // FTUE: заблокированные полосы — туда нельзя даже сдвинуться
+      if (this.ftue && (a === 'left' || a === 'right')) {
+        const to = d.lane + (a === 'right' ? 1 : -1);
+        if (to < 0 || to > 2 || this.ftue.locked[to]) {
+          this.audio.stumble();
+          this.rig.shake(0.04);
+          this.popups.custom('🔒', 'scorepop', 50, 46);
+          continue;
+        }
+      }
       if (a === 'left' && d.lane > 0) {
         if (this._podiumBlocked(d.lane - 1)) { this.audio.stumble(); this.rig.shake(0.03); }
         else { d.lane--; this.audio.laneSwitch(); this.dogModel.tailImpulse(2); }
@@ -1019,6 +1053,8 @@ export class Game {
       w._tapWindow = 0.55;
       w._tapIdx = idx;
       w._tapped = false;
+      // FTUE: ритм-индикатор — «ТАП!» на каждое окно (аудит: «в ритм» без метки непонятно)
+      if (this.ftue) this.popups.custom('ТАП! 👆', 'scorepop', 50, 55);
     }
     if (w._tapWindow > 0) {
       w._tapWindow -= dt;
@@ -1335,6 +1371,7 @@ export class Game {
   // ---------- Награды и наказания ----------
 
   _obstacleClean(e, grade, name, baseScore) {
+    if (this.ftue && this.ftue.target === e) this.ftue.cleanOk = true;
     const d = this.dog;
     this._recordObstacle(e && e.kind, grade);
     this.combo++;
@@ -1375,45 +1412,10 @@ export class Game {
       this.fx.confetti(new THREE.Vector3(d.x, 1.4, d.z - 2));
       this.audio.applause();
     }
-    // «Связка» (F2): прогресс по помеченным снарядам; полное чистое прохождение — видимый бонус.
-    if (e && e.chainId != null) {
-      if (!this.chain || this.chain.id !== e.chainId) {
-        this.chain = { id: e.chainId, len: e.chainLen, cleared: 0, base: 0, dead: false };
-        // Вход в связку: объявляем цель (флажки с номерами уже видны на снарядах впереди).
-        // Позиция выше зоны чтения снарядов (над горизонтом), по центру — не перекрывает обзор.
-        this.popups.custom('🔗 СВЯЗКА ×' + this.chain.len, 'chainpop', 50, 24);
-      }
-      if (!this.chain.dead) {
-        this.chain.cleared++;
-        // Копим БАЗОВУЮ цену снарядов (сложность): зоновые снаряды дороже базовых → их связка
-        // платит больше. Бонус масштабируется комбо (крупный джекпот «в моменте»), но НЕ perfect
-        // и НЕ бустами — иначе у безошибочного грайндера компаундится и ломает макс рейтинг
-        // (модель: с этой схемой ×1.5 у рекордсмена вместо ×3.6).
-        this.chain.base += (SCORE_BY_KIND[e && e.kind] || SCORE_CLEAN);
-        if (this.chain.cleared >= this.chain.len) {
-          // Бонус = сложность × множитель-длины × комбо(кап ×10) × meta.
-          const cm = Math.min(SCORE_COMBO_CAP, Math.max(1, this.combo));
-          const chainMult = ({ 2: 2, 3: 3, 4: 4 })[this.chain.len] || this.chain.len;
-          const bonus = Math.floor(this.chain.base * chainMult * cm * (this.metaMult || 1));
-          this.score += bonus;
-          this.runStats.chains++;
-          this.rig.rollPulse();
-          this.world.cheer(d.z, 2.0); // связка = крупная волна трибун
-          this.audio.comboMilestone(Math.max(40, this.chain.len * 10));
-          // Центр по горизонтали + выше зоны чтения снарядов — крупный бонус не уезжает за край и не мешает обзору.
-          this.popups.custom('СВЯЗКА ⚡×' + chainMult + '  +' + bonus.toLocaleString('ru'), 'chainpop', 50, 28);
-          this.fx.confetti(new THREE.Vector3(d.x, 1.6, d.z - 2));
-          this.fx.perfectBurst(new THREE.Vector3(d.x, d.y + 0.6, d.z));
-          this.ui.flash('rgba(70,210,255,0.30)');
-          this.chain = null;
-        }
-      }
-    }
   }
 
   _fault(e, reason) {
     this.combo = 0;
-    if (this.chain && !this.chain.dead) this.chain.dead = true; // любой фолт рвёт активную связку
     this.runStats.faults++;
     this.runStats._streakStart = this.distance;
     this._recordObstacle(e && e.kind, 'fault');
@@ -1519,13 +1521,259 @@ export class Game {
     track('tutorial_hint', { obstacle: kind });
   }
 
+  // ---------- Блокирующее обучение ----------
+  _ftueMaybeStart() {
+    const qs = (typeof location !== 'undefined') ? new URLSearchParams(location.search) : new URLSearchParams();
+    const force = qs.get('ftue');
+    const harness = qs.has('harness');
+    // В харнессе обучение выключено (детерминизм гейтов), если не запрошено явно ?ftue=1
+    const want = force === '1' ? true : force === '0' ? false : (!this.meta.data.ftueDone && !harness);
+    if (!want) { this.ftue = null; return; }
+    this.track.disabled = true;
+    this.ftue = {
+      idx: Math.min(this.meta.data.ftueStage || 0, FTUE_STAGES.length - 1),
+      phase: 'run', target: null, targets: [],
+      spawnT: 1.6, tries: 0, cleanOk: false, holdT: 0, rewindZ: 0, stageStartZ: 0,
+      locked: [true, false, true], // старт: только центральная
+    };
+    this._ftueWallsEnsure();
+    this.ui.showFtueBanner('ОБУЧЕНИЕ', 'Слушай тренера — и на трассу!');
+  }
+
+  _ftueStop() {
+    if (!this.ftue) return;
+    this.ftue = null;
+    this.track.disabled = false;
+    this.ui.hideFtueBanner();
+    this.ui.hideTutHint();
+    if (this._ftueWalls) for (const w of this._ftueWalls) w.visible = false;
+  }
+
+  _ftueWallsEnsure() {
+    if (this._ftueWalls) return;
+    // «Поезда» из SS: заблокированная полоса ФИЗИЧЕСКИ занята сплошной стеной
+    // из барьерных секций — туда очевидно нельзя. Секции стоят по сетке мира
+    // (снап 6 м), а не едут с собакой.
+    this._ftueWalls = [];
+    const redMat = new THREE.MeshStandardMaterial({ color: 0xd8434e, roughness: 0.8, flatShading: true });
+    const whiteMat = new THREE.MeshStandardMaterial({ color: 0xf5f0e6, roughness: 0.85, flatShading: true });
+    const SEC = 6, N = 18; // 108 м сплошной стены
+    for (let i = 0; i < 3; i++) {
+      const w = new THREE.Group();
+      for (let k = 0; k < N; k++) {
+        const z = -k * SEC;
+        // Секция: сплошная панель в два яруса (красный низ, белый верх) + столбики
+        const lo = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.5, SEC - 0.3), redMat);
+        lo.position.set(0, 0.25, z - SEC / 2);
+        const hi = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.32, SEC - 0.3), whiteMat);
+        hi.position.set(0, 0.66, z - SEC / 2);
+        const post = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.95, 0.14), whiteMat);
+        post.position.set(0, 0.48, z);
+        w.add(lo, hi, post);
+        if (k % 3 === 1) {
+          // Знак «въезд запрещён»: красный диск + белый кирпич (аудит: стена без
+          // знака читалась как декоративный бортик, а не «полоса закрыта»)
+          const sign = new THREE.Group();
+          const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.06, 18), redMat);
+          disc.rotation.x = Math.PI / 2;
+          const brick = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.13, 0.08), whiteMat);
+          sign.add(disc, brick);
+          sign.position.set(0, 1.35, z);
+          const pole = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.75, 0.08), whiteMat);
+          pole.position.set(0, 0.98, z);
+          w.add(sign, pole);
+        }
+      }
+      w.position.set(LANE_X[i], 0, 0);
+      w.visible = false;
+      this.scene.add(w);
+      this._ftueWalls.push(w);
+    }
+  }
+
+  _ftueSyncWalls() {
+    if (!this._ftueWalls) return;
+    for (let i = 0; i < 3; i++) {
+      const w = this._ftueWalls[i];
+      // Не строим стену в полосе, где собака СЕЙЧАС (dodge-этап: её полоса
+      // «закрыта» логически, но физическая стена накрыла бы камеру)
+      const on = !!(this.ftue && this.ftue.locked[i] && i !== this.dog.lane && this.ftue.phase !== 'done');
+      w.visible = on;
+      // Снап к сетке секций: стена «стоит» в мире, собака бежит вдоль неё
+      if (on) w.position.z = Math.ceil((this.dog.z + 24) / 6) * 6;
+    }
+  }
+
+  _ftueClearTargets() {
+    for (const e of this.ftue.targets) {
+      const i = this.track.entities.indexOf(e);
+      if (i >= 0) {
+        if (e.releaseSlot) e.releaseSlot();
+        this.scene.remove(e.group);
+        this.track.entities.splice(i, 1);
+      }
+    }
+    this.ftue.targets = [];
+    this.ftue.target = null;
+  }
+
+  _ftueSpawnStage() {
+    const f = this.ftue, d = this.dog;
+    const st = FTUE_STAGES[f.idx];
+    f.stageStartZ = d.z;
+    f.cleanOk = false;
+    f.acted = false;
+    f.hint2 = false;
+    const z = d.z - FTUE_SPAWN_AHEAD;
+    if (st.kind === 'dodge') {
+      // Тележка в ПОЛОСЕ собаки; открыта только полоса в сторону st.dir.
+      // Направление адаптивно: с крайней полосы в сторону края не уйти —
+      // учим в доступную (иначе тележка и «выход» совпадали и этап был непроходим)
+      let dir = st.dir;
+      if (dir === 'right' && d.lane >= 2) dir = 'left';
+      if (dir === 'left' && d.lane <= 0) dir = 'right';
+      const to = dir === 'right' ? d.lane + 1 : d.lane - 1;
+      f.locked = [true, true, true];
+      f.locked[to] = false;
+      f.target = this.track.spawnOne('cart', d.lane, z);
+      f.targets = [f.target];
+      this.ui.showTutHint('ПЕРЕСТРОЕНИЕ', 'side',
+        this.isTouch ? (dir === 'right' ? 'СВАЙП ВПРАВО' : 'СВАЙП ВЛЕВО') : (dir === 'right' ? '→' : '←'), this.isTouch);
+      this.ui.showFtueBanner(`ШАГ ${f.idx + 1}/${FTUE_STAGES.length} · ${st.title}`,
+        dir === 'right' ? 'Уйди от тележки — свайп вправо!' : 'Теперь влево — уйди от тележки!');
+    } else {
+      f.locked = [d.lane !== 0, d.lane !== 1, d.lane !== 2]; // только текущая полоса
+      f.target = this.track.spawnOne(st.kind, d.lane, z);
+      f.targets = [f.target];
+      const g = TUT_GESTURE[st.kind];
+      this.ui.showTutHint(g.name, g.dir, this.isTouch ? g.touch : g.key, this.isTouch);
+      this.ui.showFtueBanner(`ШАГ ${f.idx + 1}/${FTUE_STAGES.length} · ${st.title}`,
+        this.isTouch ? g.touch : g.key);
+    }
+    track('ftue_stage_start', { i: f.idx, kind: st.kind, tries: f.tries });
+  }
+
+  _ftueTick(dt) {
+    const f = this.ftue, d = this.dog;
+    this._ftueSyncWalls();
+    if (f.phase === 'run') {
+      if (!f.target) {
+        f.spawnT -= dt;
+        if (f.spawnT <= 0) this._ftueSpawnStage();
+        return;
+      }
+      const st = FTUE_STAGES[f.idx];
+      // Контактные снаряды: у спуска/конца — вторая подсказка про жёлтую зону
+      if (!f.hint2 && (st.kind === 'dogwalk' || st.kind === 'aframe') && this.onApparatus === f.target) {
+        const exitZ = f.target.exit != null ? f.target.exit : f.target.z;
+        if (d.z < exitZ + 8) {
+          f.hint2 = true;
+          this.ui.showTutHint('ЗОНА', 'down', this.isTouch ? 'СВАЙП ВНИЗ В ЖЁЛТОЙ ЗОНЕ' : '↓ В ЖЁЛТОЙ ЗОНЕ', this.isTouch);
+        }
+      }
+      // У слалома нет exit, а z — ВХОД: финиш считаем по последней стойке
+      const endBase = f.target.kind === 'weave'
+        ? f.target.poleZ(f.target.count - 1)
+        : (f.target.exit != null ? f.target.exit : f.target.z);
+      const endZ = endBase - 4;
+      if (d.z < endZ) {
+        // Этап с обязательным чистым прохождением: мимо кольца/стола — повтор
+        if (st.needClean && !f.cleanOk) { this._ftueFail(); return; }
+        this._ftueSuccess();
+      }
+    } else if (f.phase === 'rewind') {
+      d.speed = 0;
+      f.holdT -= dt;
+      if (f.holdT > 0) return;
+      d.z += 22 * dt; // собака отбегает назад — быстро, без затяжки
+      if (d.z >= f.rewindZ) {
+        this._ftueClearTargets();
+        f.phase = 'run';
+        f.spawnT = 0.01; // пересоздание снаряда на том же месте
+      }
+    }
+  }
+
+  _ftueSuccess() {
+    const f = this.ftue;
+    track('ftue_stage_done', { i: f.idx, kind: FTUE_STAGES[f.idx].kind, tries: f.tries });
+    this.meta.data.bones = (this.meta.data.bones || 0) + 5;
+    this.popups.custom((f.tries === 0 ? 'ОТЛИЧНО! ' : 'ПОЛУЧИЛОСЬ! ') + '+5 🦴', 'scorepop', 50, 40);
+    this.audio.perfect(1);
+    this.ui.hideTutHint();
+    f.idx++;
+    f.tries = 0;
+    this.meta.data.ftueStage = f.idx;
+    this.meta.save();
+    this._ftueClearTargets();
+    if (f.idx >= FTUE_STAGES.length) { this._ftueFinish(); return; }
+    f.spawnT = 1.4;
+    f.locked = [this.dog.lane !== 0, this.dog.lane !== 1, this.dog.lane !== 2];
+  }
+
+  _ftueFail() {
+    const f = this.ftue, d = this.dog;
+    f.tries++;
+    d.stumbleInvulnT = 1.4;
+    d.stumbleAnimT = 0.7;
+    d.stunT = 0.7;
+    this.rig.shake(0.09);
+    this.audio.stumble();
+    this.fx.crash(new THREE.Vector3(d.x, 0.3, d.z));
+    // Сброс «зависших» режимов: собака могла провалиться ВНУТРИ слалома/на буме —
+    // иначе объект-зомби продолжал обновляться на откате
+    this.weave = null;
+    this.onApparatus = null;
+    d.slideT = 0;
+    f.phase = 'rewind';
+    f.holdT = 0.9;
+    // Откат короткий: 26 м до входа снаряда хватает прочитать подсказку и среагировать
+    const entryZ = f.target ? (f.target.entry != null ? f.target.entry : f.target.z) : f.stageStartZ;
+    f.rewindZ = Math.min(f.stageStartZ, entryZ + 26);
+    // Конкретная причина (аудит: «ещё раз» без объяснения = угадывание):
+    // не жал вообще → скажи ЧТО сделать; жал → скажи ПРО ТАЙМИНГ
+    const st = FTUE_STAGES[f.idx];
+    const g = TUT_GESTURE[st.kind === 'dodge' ? 'hurdle' : st.kind] || {};
+    let why;
+    if (st.kind === 'dodge') why = f.acted ? 'Перестройся ЗАРАНЕЕ — свайпай раньше!' : (st.dir === 'right' ? 'Смахни ВПРАВО, чтобы уйти от тележки!' : 'Смахни ВЛЕВО, чтобы уйти от тележки!');
+    else if (st.kind === 'weave') why = 'Тапай на КАЖДУЮ стойку — не части и не спи!';
+    else if (!f.acted) why = (this.isTouch ? g.touch : g.key) + ' — попробуй сейчас!';
+    else why = 'Почти! Сделай это чуть ' + ((st.kind === 'tunnel') ? 'раньше, у входа.' : 'позже, прямо перед снарядом.');
+    f.acted = false;
+    this.ui.showFtueBanner(`ШАГ ${f.idx + 1}/${FTUE_STAGES.length} · ${st.title}`, why);
+    track('ftue_stage_fail', { i: f.idx, kind: st.kind, tries: f.tries });
+  }
+
+  _ftueFinish() {
+    track('ftue_done', {});
+    this.meta.data.ftueDone = true;
+    this.meta.data.ftueStage = 0;
+    this.meta.data.bones = (this.meta.data.bones || 0) + 100;
+    // Старые контекстные подсказки не дублируем: всё уже показали
+    for (const k of Object.keys(TUT_GESTURE)) this.tutorial.learned[k] = true;
+    this._tutSave && this._tutSave();
+    this.meta.save();
+    // Сложность/очки: тутор — не забег. Дистанция не копилась (см. update), очки обнуляем
+    this.score = 0;
+    this.combo = 0;
+    this.cookieStreak = 0;
+    this.ui.showFtueBanner('ОБУЧЕНИЕ ПРОЙДЕНО! 🎉', '+100 🦴 — а теперь настоящий забег!');
+    this.popups.custom('+100 🦴', 'scorepop', 50, 36);
+    this.audio.fanfare ? this.audio.fanfare() : this.audio.perfect(3);
+    const self = this;
+    setTimeout(() => { if (!self.ftue) return; }, 0);
+    this.ftue = null;
+    this.track.disabled = false;
+    if (this._ftueWalls) for (const w of this._ftueWalls) w.visible = false;
+    // Баннер скрываем чуть позже — игрок должен успеть прочитать поздравление
+    this._ftueBannerHideT = 3.5;
+  }
+
   _stumble(withFault, reason) {
     const d = this.dog;
     if (d.stumbleInvulnT > 0) return;
+    if (this.ftue) { this._ftueFail(); return; }
     if (this.judgeT > 0) { this._death(null, true); return; } // второй фолт при судье — дисквалификация
-    // Любое «грязное» прохождение (даже soft-stumble без фолта, напр. проваленный вход в тоннель)
-    // рвёт активную «Связку»: бонус — только за ПОЛНОСТЬЮ чистую последовательность.
-    if (this.chain && !this.chain.dead) this.chain.dead = true;
     // Sonic-паттерн: часть косточек рассыпается вперёд — их можно переподобрать.
     // Спавн откладываем: _stumble может вызываться из for...of по track.entities
     const scatter = Math.min(10, Math.floor(this.runStats.cookies * 0.2));
@@ -1562,7 +1810,7 @@ export class Game {
   }
 
   _death(e, disqualified = false) {
-    if (this.chain && !this.chain.dead) this.chain.dead = true; // смерть/дисквал/спасение рвёт связку
+    if (this.ftue && this.state === 'running') { this._ftueFail(); return; }
     // Тягач ловит удар: спасает от краша и ломается (в зубы). Одноразово в окне tugT.
     if (this.tugT > 0 && this.state === 'running') { this._tugCrashSave(e); return; }
     this._lastHazardKind = e && e.kind ? e.kind : (disqualified ? 'judge' : 'stumble');
