@@ -1378,23 +1378,22 @@ export class Game {
     // «Связка» (F2): прогресс по помеченным снарядам; полное чистое прохождение — видимый бонус.
     if (e && e.chainId != null) {
       if (!this.chain || this.chain.id !== e.chainId) {
-        this.chain = { id: e.chainId, len: e.chainLen, cleared: 0, earned: 0, dead: false };
+        this.chain = { id: e.chainId, len: e.chainLen, cleared: 0, base: 0, dead: false };
         // Вход в связку: объявляем цель (флажки с номерами уже видны на снарядах впереди).
         this.popups.custom('🔗 СВЯЗКА ×' + this.chain.len, 'combo', 55, 32);
       }
       if (!this.chain.dead) {
         this.chain.cleared++;
-        // Копим РЕАЛЬНО заработанные очки этого снаряда (pts уже содержит ВСЕ активные
-        // множители: комбо×multi×tableBoost×meta×perfect). Так множитель связки корректно
-        // уживается со всеми остальными — не пересчитывает своё и ничего не игнорирует.
-        this.chain.earned += pts;
+        // Копим БАЗОВУЮ цену снарядов (сложность): зоновые снаряды дороже базовых → их связка
+        // платит больше. Бонус масштабируется комбо (крупный джекпот «в моменте»), но НЕ perfect
+        // и НЕ бустами — иначе у безошибочного грайндера компаундится и ломает макс рейтинг
+        // (модель: с этой схемой ×1.5 у рекордсмена вместо ×3.6).
+        this.chain.base += (SCORE_BY_KIND[e && e.kind] || SCORE_CLEAN);
         if (this.chain.cleared >= this.chain.len) {
-          // МНОЖИТЕЛЬ связки растёт с длиной (ради чего рисковать): применяется к тому, что
-          // реально заработано в связке. Полная ценность связки = earned × chainMult; бонус —
-          // добавка сверх уже начисленного. Зоновые снаряды дороже базовых → их связка сама
-          // по себе платит больше (это уже сидит в earned), джекпот не пересчитывает это заново.
-          const chainMult = ({ 2: 2, 3: 4, 4: 6 })[this.chain.len] || this.chain.len;
-          const bonus = Math.floor(this.chain.earned * (chainMult - 1));
+          // Бонус = сложность × множитель-длины × комбо(кап ×10) × meta.
+          const cm = Math.min(SCORE_COMBO_CAP, Math.max(1, this.combo));
+          const chainMult = ({ 2: 2, 3: 3, 4: 4 })[this.chain.len] || this.chain.len;
+          const bonus = Math.floor(this.chain.base * chainMult * cm * (this.metaMult || 1));
           this.score += bonus;
           this.runStats.chains++;
           this.rig.rollPulse();
