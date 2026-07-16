@@ -1388,20 +1388,21 @@ export class Game {
         // (aframe/seesaw/table) стоит в 2-3× дороже простой → выше риск оправдан выше наградой.
         this.chain.value += (SCORE_BY_KIND[e && e.kind] || SCORE_CLEAN);
         if (this.chain.cleared >= this.chain.len) {
-          // Существенная премия, масштабная по СЛОЖНОСТИ связки и комбо-множителю (кап ×10 —
-          // как обычный счёт, без инфляции). За полную чистую связку ≈ удваивает ценность
-          // последовательности, а за рискованную (с аппаратами) — платит кратно больше.
+          // МНОЖИТЕЛЬ связки растёт с длиной — вот ради чего рисковать: длинная связка = джекпот.
+          // Итог = сложность(сумма цены снарядов) × множитель-длины × комбо(кап ×10) × meta.
+          // Комбо-кап держит планку против инфляции, но множитель-длины даёт крупный спайк.
           const cm = Math.min(SCORE_COMBO_CAP, Math.max(1, this.combo));
-          const bonus = Math.floor(this.chain.value * cm * (this.metaMult || 1));
+          const chainMult = ({ 2: 3, 3: 5, 4: 8 })[this.chain.len] || this.chain.len;
+          const bonus = Math.floor(this.chain.value * chainMult * cm * (this.metaMult || 1));
           this.score += bonus;
           this.runStats.chains++;
           this.rig.rollPulse();
-          this.world.cheer(d.z, 1.8); // связка = крупная волна трибун
-          this.audio.comboMilestone(Math.max(30, this.chain.len * 8));
-          this.popups.custom('СВЯЗКА ×' + this.chain.len + '  +' + bonus.toLocaleString('ru'), 'combo', 80, 44);
+          this.world.cheer(d.z, 2.0); // связка = крупная волна трибун
+          this.audio.comboMilestone(Math.max(40, this.chain.len * 10));
+          this.popups.custom('СВЯЗКА ⚡×' + chainMult + '  +' + bonus.toLocaleString('ru'), 'combo', 92, 48);
           this.fx.confetti(new THREE.Vector3(d.x, 1.6, d.z - 2));
           this.fx.perfectBurst(new THREE.Vector3(d.x, d.y + 0.6, d.z));
-          this.ui.flash('rgba(70,210,255,0.22)');
+          this.ui.flash('rgba(70,210,255,0.30)');
           this.chain = null;
         }
       }
