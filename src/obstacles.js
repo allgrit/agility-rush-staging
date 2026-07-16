@@ -1072,28 +1072,31 @@ function chainDigitTex(num) {
   _chainDigitTex[num] = tex;
   return tex;
 }
-// topY — высота верха снаряда, чтобы флажок стоял НАД ним (не внутри).
-export function makeChainMarker(num, topY = 1.2) {
+// topY — высота верха снаряда; xOff — сдвиг вбок (флажок стоит СБОКУ от снаряда, не по центру,
+// чтобы не загораживать сам снаряд). Знак xOff = в какую сторону смотрит вымпел.
+export function makeChainMarker(num, topY = 1.2, xOff = 0.9) {
   if (!_chainMat) {
     _chainMat = std(CHAIN_TINT, { emissive: 0x0c6ea0, roughness: 0.4 });
     _chainMat.emissiveIntensity = 1.1; // светится под bloom — заметно на трассе
     _chainMat.userData.shared = true;
   }
   const g = new THREE.Group();
+  const side = xOff >= 0 ? 1 : -1;
   const poleTop = topY + 1.35;
   const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, poleTop, 6), _chainMat);
   pole.position.y = poleTop / 2;
   g.add(pole);
-  // Вымпел — треугольник сбоку от шеста
+  // Вымпел — треугольник, смотрит НАРУЖУ (от снаряда)
   const pennant = new THREE.Mesh(new THREE.ConeGeometry(0.32, 0.6, 3), _chainMat);
-  pennant.rotation.set(Math.PI / 2, 0, -Math.PI / 2);
-  pennant.position.set(0.24, poleTop - 0.2, 0);
+  pennant.rotation.set(Math.PI / 2, 0, -Math.PI / 2 * side);
+  pennant.position.set(0.24 * side, poleTop - 0.2, 0);
   g.add(pennant);
   // Номер позиции в связке — крупный спрайт (лицом к камере, поверх геометрии, читаем на скорости)
   const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: chainDigitTex(num), transparent: true, depthWrite: false, depthTest: false }));
   spr.scale.setScalar(0.95);
   spr.position.set(0, poleTop + 0.42, 0);
   g.add(spr);
+  g.position.x = xOff; // ВБОК от снаряда
   return g;
 }
 

@@ -266,8 +266,9 @@ export class Track {
         else { rec = this._add(buildHurdle(lane, lz)); this._cookieArc(lane, lz); }
         // Метки связки: game.js трекает прогресс и выдаёт бонус за полное прохождение.
         rec.chainId = cid; rec.chainIndex = i; rec.chainLen = len;
-        // Видимый флажок НА снаряде с номером позиции (1,2,3…) — понятно, что снаряды связаны.
-        rec.group.add(makeChainMarker(i + 1, TOP_Y[k]));
+        // Видимый флажок СБОКУ от снаряда с номером позиции (1,2,3…) — понятно, что снаряды
+        // связаны, но сам снаряд не загорожен. Крайняя правая полоса → флажок влево (к центру).
+        rec.group.add(makeChainMarker(i + 1, TOP_Y[k], lane === 2 ? -0.9 : 0.9));
         lz -= gap;
         if (rng.chance(0.4)) lane = Math.max(0, Math.min(2, lane + rng.pick([-1, 1])));
       }
