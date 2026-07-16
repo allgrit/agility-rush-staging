@@ -254,21 +254,27 @@ export class Track {
     if (APPARATUS.includes(picked) && idx > 8 && rng.chance(pChain)) {
       const len = 2 + (rng.chance(diff) ? 1 : 0) + (rng.chance(hard) ? 1 : 0); // 2..4
       const cid = ++this.chainSeq;
-      const gap = Math.max(12, estSpeed * 1.05); // ≥ дальности прыжка — честно для реакции на 26 м/с
+      const gap = Math.max(13, estSpeed * 1.05); // ≥ дальности прыжка — честно для реакции на 26 м/с
       let lz = this.nextSpawnZ - 6; // впереди всего, что уже заспавнено в чанке
       let lane = rng.int(0, 2);
-      const TOP_Y = { hurdle: 1.0, tire: 2.15, tunnel: 1.95 }; // верх снаряда — флажок ставим НАД ним
+      // Пул снарядов связки растёт СО ВРЕМЕНЕМ: простые — всегда; зоновые аппараты подключаются
+      // по мере роста сложности. У них выше срыв (риск), но и бонус за них больше (game.js считает
+      // премию по сумме сложности снарядов). Слалом (weave, 71% срыв) в связки НЕ берём — он бы
+      // сделал завершение почти невозможным и превратил азарт в фрустрацию.
+      const pool = ['hurdle', 'tire', 'tunnel'];
+      if (diff >= 0.6) pool.push('table', 'dogwalk');  // ~820 м: премиальные, умеренный риск
+      if (hard > 0.25) pool.push('seesaw', 'aframe');   // ~1900 м: высокий риск — высокая награда
+      const BUILD = { hurdle: buildHurdle, tire: buildTire, tunnel: buildTunnel,
+        table: buildTable, dogwalk: buildDogwalk, seesaw: buildSeesaw, aframe: buildAFrame };
+      const TOP_Y = { hurdle: 1.0, tire: 2.15, tunnel: 1.95, table: 0.95, dogwalk: 1.5, seesaw: 0.95, aframe: 2.0 };
       for (let i = 0; i < len; i++) {
-        const k = rng.pick(['hurdle', 'tire', 'tunnel']);
-        let rec;
-        if (k === 'tunnel') rec = this._add(buildTunnel(lane, lz));
-        else if (k === 'tire') { rec = this._add(buildTire(lane, lz)); this._cookieArc(lane, lz); }
-        else { rec = this._add(buildHurdle(lane, lz)); this._cookieArc(lane, lz); }
+        const k = rng.pick(pool);
+        const rec = this._add(BUILD[k](lane, lz));
+        if (k === 'hurdle' || k === 'tire') this._cookieArc(lane, lz); // хлебные крошки-подсказки
         // Метки связки: game.js трекает прогресс и выдаёт бонус за полное прохождение.
         rec.chainId = cid; rec.chainIndex = i; rec.chainLen = len;
-        // Видимый флажок СБОКУ от снаряда с номером позиции (1,2,3…) — понятно, что снаряды
-        // связаны, но сам снаряд не загорожен. Крайняя правая полоса → флажок влево (к центру).
-        rec.group.add(makeChainMarker(i + 1, TOP_Y[k], lane === 2 ? -0.9 : 0.9));
+        // Флажок СБОКУ от снаряда: левая полоса → флажок СЛЕВА, центр/правая → СПРАВА (правило игрока).
+        rec.group.add(makeChainMarker(i + 1, TOP_Y[k], lane === 0 ? -0.9 : 0.9));
         lz -= gap;
         if (rng.chance(0.4)) lane = Math.max(0, Math.min(2, lane + rng.pick([-1, 1])));
       }

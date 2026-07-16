@@ -1378,18 +1378,21 @@ export class Game {
     // «Связка» (F2): прогресс по помеченным снарядам; полное чистое прохождение — видимый бонус.
     if (e && e.chainId != null) {
       if (!this.chain || this.chain.id !== e.chainId) {
-        this.chain = { id: e.chainId, len: e.chainLen, cleared: 0, dead: false };
+        this.chain = { id: e.chainId, len: e.chainLen, cleared: 0, value: 0, dead: false };
         // Вход в связку: объявляем цель (флажки с номерами уже видны на снарядах впереди).
         this.popups.custom('🔗 СВЯЗКА ×' + this.chain.len, 'combo', 55, 32);
       }
       if (!this.chain.dead) {
         this.chain.cleared++;
+        // Копим «сложность» связки по базовой цене снарядов: связка из зоновых аппаратов
+        // (aframe/seesaw/table) стоит в 2-3× дороже простой → выше риск оправдан выше наградой.
+        this.chain.value += (SCORE_BY_KIND[e && e.kind] || SCORE_CLEAN);
         if (this.chain.cleared >= this.chain.len) {
-          // Существенная премия: масштабируется комбо-множителем (кап ×10, как обычный счёт —
-          // без инфляции), но за ПОЛНУЮ чистую связку даёт ~столько же, сколько сами снаряды →
-          // фактически удваивает ценность последовательности. Стимул идти на связку, а не «подряд».
+          // Существенная премия, масштабная по СЛОЖНОСТИ связки и комбо-множителю (кап ×10 —
+          // как обычный счёт, без инфляции). За полную чистую связку ≈ удваивает ценность
+          // последовательности, а за рискованную (с аппаратами) — платит кратно больше.
           const cm = Math.min(SCORE_COMBO_CAP, Math.max(1, this.combo));
-          const bonus = Math.floor(120 * this.chain.len * cm * (this.metaMult || 1));
+          const bonus = Math.floor(this.chain.value * cm * (this.metaMult || 1));
           this.score += bonus;
           this.runStats.chains++;
           this.rig.rollPulse();
