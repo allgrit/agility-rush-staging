@@ -1,3 +1,3 @@
 // Единая версия игры. Показывается на первом экране (меню) и служит меткой сборки.
 // При деплое поднимай это число И VERSION в sw.js (agility-rush-vN) синхронно.
-export const APP_VERSION = 'STAGING · v48 · связки: баланс бонуса';
+export const APP_VERSION = 'STAGING · v49 · связки: попап-фикс';

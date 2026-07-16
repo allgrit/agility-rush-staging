@@ -8,8 +8,8 @@
   // Bootstrap-версия: index.html грузится всегда свежим (network-first / без SW),
   // поэтому знает актуальную сборку. Если у игрока в кэше старьё — один раз чистим
   // все кэши, разрегистрируем старый SW и перезагружаемся. Разрывает «залипание» SW.
-  window.__BUILD = 'staging-v48-2026-07-16';
-  window.__CACHE = 'agility-staging-v48'; // должно совпадать с VERSION в sw.js
+  window.__BUILD = 'staging-v49-2026-07-16';
+  window.__CACHE = 'agility-rush-v30'; // должно совпадать с VERSION в sw.js
   (function () {
     try {
       var qs = new URLSearchParams(location.search);
@@ -469,6 +469,8 @@
   .popup.clean { font-size: 30px; color: #9adcff; }
   .popup.fault { font-size: 30px; color: #ff7a6e; }
   .popup.combo { font-size: 36px; color: #ffb347; }
+  /* Попап связки: крупный бонус (десятки тысяч) должен влезать по ширине даже на узком экране */
+  .popup.chainpop { font-size: 30px; color: #8fe6ff; -webkit-text-stroke: 1px #0a4a66; text-shadow: 0 3px 12px rgba(0,0,0,0.6); }
   .popup.scorepop { font-size: 30px; color: #ffd75a; -webkit-text-stroke: 1px #7a4a12; text-shadow: 0 3px 12px rgba(0,0,0,0.65); }
   .popup.miss { font-size: 16px; color: #ffb0a8; }
 
@@ -730,6 +732,7 @@
     .popup.perfect { font-size: 34px; }
     .popup.clean, .popup.fault { font-size: 24px; }
     .popup.scorepop { font-size: 24px; }
+    .popup.chainpop { font-size: 22px; }
   }
 
   #update-banner {
