@@ -2,7 +2,7 @@ import {
   buildHurdle, buildTire, buildTunnel, buildWeave, buildAFrame,
   buildDogwalk, buildSeesaw, buildTable, buildCart, buildHay, buildFence,
   buildCone, buildPuddle, buildSprinkler, buildCookie, initCookieBatch, buildPowerup,
-  buildPodium, buildRecordFlag, buildToken, buildLetter,
+  buildPodium, buildRecordFlag, buildToken, buildLetter, makeChainMarker,
 } from './obstacles.js';
 
 // Генератор трассы: паттерны спавнятся чанками впереди собаки.
@@ -257,6 +257,7 @@ export class Track {
       const gap = Math.max(12, estSpeed * 1.05); // ≥ дальности прыжка — честно для реакции на 26 м/с
       let lz = this.nextSpawnZ - 6; // впереди всего, что уже заспавнено в чанке
       let lane = rng.int(0, 2);
+      const TOP_Y = { hurdle: 1.0, tire: 2.15, tunnel: 1.95 }; // верх снаряда — флажок ставим НАД ним
       for (let i = 0; i < len; i++) {
         const k = rng.pick(['hurdle', 'tire', 'tunnel']);
         let rec;
@@ -265,6 +266,8 @@ export class Track {
         else { rec = this._add(buildHurdle(lane, lz)); this._cookieArc(lane, lz); }
         // Метки связки: game.js трекает прогресс и выдаёт бонус за полное прохождение.
         rec.chainId = cid; rec.chainIndex = i; rec.chainLen = len;
+        // Видимый флажок НА снаряде с номером позиции (1,2,3…) — понятно, что снаряды связаны.
+        rec.group.add(makeChainMarker(i + 1, TOP_Y[k]));
         lz -= gap;
         if (rng.chance(0.4)) lane = Math.max(0, Math.min(2, lane + rng.pick([-1, 1])));
       }

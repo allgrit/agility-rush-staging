@@ -1052,6 +1052,51 @@ export function buildRecordFlag(z) {
   return { kind: 'recordflag', lane: 1, z, group: g, resolved: false, update() {} };
 }
 
+// --- Флажок «Связки» НА снаряде: номер позиции (1,2,3…) + общий цвет для всей связки ---
+// Ресурсы общие (userData.shared) — текстура кэшируется на цифру, материал вымпела один на все.
+// disposeGroup их НЕ трогает (иначе churn/поломка при рециклинге снарядов).
+const CHAIN_TINT = 0x2fc7ff; // единый бирюзовый — сигнал «эти снаряды — одна последовательность»
+let _chainMat = null;
+const _chainDigitTex = {};
+function chainDigitTex(num) {
+  if (_chainDigitTex[num]) return _chainDigitTex[num];
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = 64;
+  const ctx = cv.getContext('2d');
+  ctx.font = 'bold 50px Arial';
+  ctx.textAlign = 'center';
+  ctx.strokeStyle = '#05303f'; ctx.lineWidth = 8; ctx.strokeText(num, 32, 49);
+  ctx.fillStyle = '#ffffff'; ctx.fillText(num, 32, 49);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.userData.shared = true;
+  _chainDigitTex[num] = tex;
+  return tex;
+}
+// topY — высота верха снаряда, чтобы флажок стоял НАД ним (не внутри).
+export function makeChainMarker(num, topY = 1.2) {
+  if (!_chainMat) {
+    _chainMat = std(CHAIN_TINT, { emissive: 0x0c6ea0, roughness: 0.4 });
+    _chainMat.emissiveIntensity = 1.1; // светится под bloom — заметно на трассе
+    _chainMat.userData.shared = true;
+  }
+  const g = new THREE.Group();
+  const poleTop = topY + 1.35;
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, poleTop, 6), _chainMat);
+  pole.position.y = poleTop / 2;
+  g.add(pole);
+  // Вымпел — треугольник сбоку от шеста
+  const pennant = new THREE.Mesh(new THREE.ConeGeometry(0.32, 0.6, 3), _chainMat);
+  pennant.rotation.set(Math.PI / 2, 0, -Math.PI / 2);
+  pennant.position.set(0.24, poleTop - 0.2, 0);
+  g.add(pennant);
+  // Номер позиции в связке — крупный спрайт (лицом к камере, поверх геометрии, читаем на скорости)
+  const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: chainDigitTex(num), transparent: true, depthWrite: false, depthTest: false }));
+  spr.scale.setScalar(0.95);
+  spr.position.set(0, poleTop + 0.42, 0);
+  g.add(spr);
+  return g;
+}
+
 // Судья-преследователь (появляется после спотыкания)
 export function buildJudge() {
   const g = new THREE.Group();

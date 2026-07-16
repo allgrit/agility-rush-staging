@@ -1377,18 +1377,28 @@ export class Game {
     }
     // «Связка» (F2): прогресс по помеченным снарядам; полное чистое прохождение — видимый бонус.
     if (e && e.chainId != null) {
-      if (!this.chain || this.chain.id !== e.chainId) this.chain = { id: e.chainId, len: e.chainLen, cleared: 0, dead: false };
+      if (!this.chain || this.chain.id !== e.chainId) {
+        this.chain = { id: e.chainId, len: e.chainLen, cleared: 0, dead: false };
+        // Вход в связку: объявляем цель (флажки с номерами уже видны на снарядах впереди).
+        this.popups.custom('🔗 СВЯЗКА ×' + this.chain.len, 'combo', 55, 32);
+      }
       if (!this.chain.dead) {
         this.chain.cleared++;
         if (this.chain.cleared >= this.chain.len) {
-          const bonus = Math.floor(220 * this.chain.len * (this.metaMult || 1));
+          // Существенная премия: масштабируется комбо-множителем (кап ×10, как обычный счёт —
+          // без инфляции), но за ПОЛНУЮ чистую связку даёт ~столько же, сколько сами снаряды →
+          // фактически удваивает ценность последовательности. Стимул идти на связку, а не «подряд».
+          const cm = Math.min(SCORE_COMBO_CAP, Math.max(1, this.combo));
+          const bonus = Math.floor(120 * this.chain.len * cm * (this.metaMult || 1));
           this.score += bonus;
           this.runStats.chains++;
           this.rig.rollPulse();
-          this.world.cheer(d.z, 1.6); // связка = крупная волна трибун
-          this.audio.comboMilestone(Math.max(20, this.chain.len * 6));
-          this.popups.custom('СВЯЗКА ×' + this.chain.len + '  +' + bonus.toLocaleString('ru'), 'combo', 70, 40);
-          this.fx.confetti(new THREE.Vector3(d.x, 1.5, d.z - 2));
+          this.world.cheer(d.z, 1.8); // связка = крупная волна трибун
+          this.audio.comboMilestone(Math.max(30, this.chain.len * 8));
+          this.popups.custom('СВЯЗКА ×' + this.chain.len + '  +' + bonus.toLocaleString('ru'), 'combo', 80, 44);
+          this.fx.confetti(new THREE.Vector3(d.x, 1.6, d.z - 2));
+          this.fx.perfectBurst(new THREE.Vector3(d.x, d.y + 0.6, d.z));
+          this.ui.flash('rgba(70,210,255,0.22)');
           this.chain = null;
         }
       }
