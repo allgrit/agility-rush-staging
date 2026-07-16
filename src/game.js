@@ -1570,17 +1570,17 @@ export class Game {
         const post = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.95, 0.14), whiteMat);
         post.position.set(0, 0.48, z);
         w.add(lo, hi, post);
-        if (k % 3 === 1) {
+        if (k % 4 === 1) {
           // Знак «въезд запрещён»: красный диск + белый кирпич (аудит: стена без
           // знака читалась как декоративный бортик, а не «полоса закрыта»)
           const sign = new THREE.Group();
-          const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.06, 18), redMat);
+          const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.27, 0.27, 0.06, 18), redMat);
           disc.rotation.x = Math.PI / 2;
-          const brick = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.13, 0.08), whiteMat);
+          const brick = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.11, 0.08), whiteMat);
           sign.add(disc, brick);
-          sign.position.set(0, 1.35, z);
-          const pole = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.75, 0.08), whiteMat);
-          pole.position.set(0, 0.98, z);
+          sign.position.set(0, 1.14, z);
+          const pole = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.5, 0.07), whiteMat);
+          pole.position.set(0, 0.86, z);
           w.add(sign, pole);
         }
       }
@@ -1599,8 +1599,9 @@ export class Game {
       // «закрыта» логически, но физическая стена накрыла бы камеру)
       const on = !!(this.ftue && this.ftue.locked[i] && i !== this.dog.lane && this.ftue.phase !== 'done');
       w.visible = on;
-      // Снап к сетке секций: стена «стоит» в мире, собака бежит вдоль неё
-      if (on) w.position.z = Math.ceil((this.dog.z + 24) / 6) * 6;
+      // Снап с периодом = периоду ЗНАКОВ (4 секции × 6 м): конструкция инвариантна
+      // сдвигу — знаки не «прыгают туда-сюда» при рецикле (жалоба игрока)
+      if (on) w.position.z = Math.ceil((this.dog.z + 24) / 24) * 24;
     }
   }
 
