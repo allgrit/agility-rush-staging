@@ -8,8 +8,8 @@
   // Bootstrap-версия: index.html грузится всегда свежим (network-first / без SW),
   // поэтому знает актуальную сборку. Если у игрока в кэше старьё — один раз чистим
   // все кэши, разрегистрируем старый SW и перезагружаемся. Разрывает «залипание» SW.
-  window.__BUILD = 'staging-v50-zones-judge';
-  window.__CACHE = 'agility-staging-v50'; // должно совпадать с VERSION в sw.js // должно совпадать с VERSION в sw.js
+  window.__BUILD = 'staging-v51-balance';
+  window.__CACHE = 'agility-staging-v51'; // должно совпадать с VERSION в sw.js // должно совпадать с VERSION в sw.js
   (function () {
     try {
       var qs = new URLSearchParams(location.search);
@@ -346,6 +346,14 @@
     color: #9fb4d8; font: 700 12px/1 inherit; padding: 5px 10px; cursor: pointer;
     vertical-align: middle;
   }
+  #balance-hint {
+    position: absolute; top: 34%; left: 50%; transform: translateX(-50%);
+    display: none; z-index: 26; pointer-events: none;
+    font-weight: 900; font-size: 26px; color: #fff;
+    text-shadow: 0 2px 0 #1c2b4a, 0 4px 14px rgba(0,0,0,.85);
+    animation: balpulse 0.5s ease-in-out infinite alternate;
+  }
+  @keyframes balpulse { from { transform: translateX(-50%) scale(1); } to { transform: translateX(-50%) scale(1.12); } }
   #judge-warn {
     position: absolute; top: 58px; left: 50%; transform: translateX(-50%);
     display: none; flex-direction: column; align-items: center; gap: 3px;
@@ -848,6 +856,7 @@
     <div id="ftue-banner"></div>
     <button id="ftue-skip">Пропустить обучение ›</button>
     <div id="judge-warn"><span class="jw-t"></span><span class="jw-rule"></span></div>
+    <div id="balance-hint"></div>
     <div id="update-banner">Доступно обновление игры <button id="update-apply">Обновить</button></div>
     <div id="mission-toast"></div>
   </div>

@@ -801,6 +801,18 @@ export class UI {
     el.onclick = () => { onSkip && onSkip(); };
   }
 
+  // Стрелка баланса на буме: явное «куда жать», когда собаку валит (жалоба:
+  // контринтуитивно). Контр-свайп: валит вправо → жми влево.
+  setBalanceHint(dir) {
+    const el = document.getElementById('balance-hint');
+    if (!el) return;
+    if (dir !== this._balDir) {
+      this._balDir = dir;
+      el.style.display = dir ? 'flex' : 'none';
+      if (dir) el.textContent = dir === 'left' ? '⬅ ЖМИ ВЛЕВО' : 'ЖМИ ВПРАВО ➡';
+    }
+  }
+
   // Плашка судьи: игроки не понимали механику проигрыша («жизней» нет — есть судья)
   setJudgeWarn(judgeT) {
     const el = document.getElementById('judge-warn');

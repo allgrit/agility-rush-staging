@@ -432,7 +432,7 @@ export class Dog {
         tailBase = -0.1; tailWagAmp = 0.3;
       }
       if (mode === 'balance') {
-        bodyRoll = (p.balance || 0) * 0.8;
+        bodyRoll = (p.balance || 0) * 1.05; // заметнее: игроки читали крен слишком поздно
         bodyY = 0.40;
         headPitch = 0.12; // смотрит под ноги
       }

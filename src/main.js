@@ -290,7 +290,8 @@ window.addEventListener('touchend', (e) => {
   // Порог свайпа маленький (14px) и направление важнее величины — короткие свайпы
   // вниз/вверх должны срабатывать как подкат/прыжок, а не превращаться в тап.
   if (adx < 14 && ady < 14) {
-    game.input('tap'); // короткое касание — ритм слалома / прыжок
+    // Короткое касание: ритм слалома / прыжок; на буме сторона экрана = шаг балансом
+    game.input(e.changedTouches[0].clientX < window.innerWidth / 2 ? 'tapL' : 'tapR');
     return;
   }
   if (ady > adx) game.input(dy > 0 ? 'down' : 'up');

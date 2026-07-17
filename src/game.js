@@ -456,6 +456,9 @@ export class Game {
     if (this.ftue) this._ftueTick(dt);
     if (this._ftueBannerHideT > 0) { this._ftueBannerHideT -= dt; if (this._ftueBannerHideT <= 0) this.ui.hideFtueBanner(); }
     this.ui.setJudgeWarn(this.judgeT);
+    this.ui.setBalanceHint((this.onApparatus && this.onApparatus.kind === 'dogwalk' && this.apparatusState
+      && Math.abs(this.apparatusState.balance) > 0.35)
+      ? (this.apparatusState.balance > 0 ? 'left' : 'right') : null);
     this._trackProgress();
     this.score += d.speed * dt * (this.powerups.multi > 0 ? 2 : 1) * (this.tableBoostT > 0 ? 2 : 1) * (this.metaMult || 1);
 
@@ -467,7 +470,7 @@ export class Game {
       const prog = (w.entry - d.z) / w.spacing;
       targetX = LANE_X[w.lane] + Math.cos(prog * Math.PI) * 0.4;
     } else if (this.onApparatus && this.onApparatus.kind === 'dogwalk') {
-      targetX = LANE_X[this.onApparatus.lane] + (this.apparatusState.balance || 0) * 0.2;
+      targetX = LANE_X[this.onApparatus.lane] + (this.apparatusState.balance || 0) * 0.3; // сдвиг виднее
     } else if (this.onApparatus) {
       targetX = LANE_X[this.onApparatus.lane];
     }
@@ -713,7 +716,13 @@ export class Game {
   _processInput(dt) {
     const d = this.dog;
     while (this.inputQueue.length) {
-      const a = this.inputQueue.shift();
+      let a = this.inputQueue.shift();
+      // Тап со стороной экрана (мобилки): на буме равен свайпу-балансу
+      // (жалоба: свайпать в панике сложно); в остальных местах — обычный тап
+      if (a === 'tapL' || a === 'tapR') {
+        if (this.onApparatus && this.onApparatus.kind === 'dogwalk') a = a === 'tapL' ? 'left' : 'right';
+        else a = 'tap';
+      }
       if (this.ftue && this.ftue.phase !== 'run') continue; // на возврате управление отключено
       // Этап слалома: до входа в змейку тапы/прыжки глушим — игроки тапали заранее,
       // собака прыгала и «не заходила в слалом» (жалоба)
