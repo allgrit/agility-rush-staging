@@ -30,6 +30,8 @@ export class UI {
     this.cookieEl = document.getElementById('cookies');
     this.comboEl = document.getElementById('combo');
     this.comboFill = document.getElementById('combo-fill');
+    this.chainEl = document.getElementById('chain');
+    this.chainTxt = document.getElementById('chain-txt');
     this.powerupsEl = document.getElementById('powerups');
     this.menuEl = document.getElementById('menu');
     this.overEl = document.getElementById('gameover');
@@ -824,6 +826,13 @@ export class UI {
       const hot = state.combo >= 10;
       if (hot !== h.comboHot) { h.comboHot = hot; this.comboEl.classList.toggle('hot', hot); }
     }
+    // «Связка» (F2): пилюля прогресса n/len, пока игрок внутри активной связки (диффим)
+    const chainVis = state.chainN > 0;
+    if (chainVis !== !!h.chainVis) { h.chainVis = chainVis; this.chainEl.style.display = chainVis ? 'block' : 'none'; }
+    if (chainVis) {
+      const ct = state.chainN + '/' + state.chainLen;
+      if (ct !== h.chainTxt) { h.chainTxt = ct; this.chainTxt.textContent = '🔗 СВЯЗКА ' + ct; }
+    }
     // Пауэрапы: ПОСТОЯННЫЕ узлы (создаём один раз), меняем только видимость и ширину полоски —
     // без пересборки innerHTML каждый кадр.
     if (!this._pwNodes) {
@@ -880,13 +889,23 @@ export class UI {
 
   // Летящая к счётчику косточка + панч счётчика
   flyCookie(from) {
+    // Троттлинг: при магните/пуллере печеньки сыпятся 10+/с — каждый вызов делал
+    // create DOM + getBoundingClientRect + форс-reflow → фризы «будто 15 fps» на
+    // телефоне (жалоба). Летящую косточку рисуем не чаще раза в 130 мс, цель кэшируем.
+    const now = performance.now();
+    if (this._flyLast && now - this._flyLast < 130) return;
+    this._flyLast = now;
+    if (!this._flyTarget || now - (this._flyTargetAt || 0) > 1500) {
+      this._flyTarget = this.cookieEl.getBoundingClientRect();
+      this._flyTargetAt = now;
+    }
+    const target = this._flyTarget;
     const el = document.createElement('div');
     el.className = 'fly-bone';
     el.textContent = '🦴';
     el.style.left = from.x + '%';
     el.style.top = from.y + '%';
     document.body.appendChild(el);
-    const target = this.cookieEl.getBoundingClientRect();
     requestAnimationFrame(() => {
       el.style.left = (target.left + target.width * 0.2) + 'px';
       el.style.top = target.top + 'px';
@@ -895,9 +914,12 @@ export class UI {
     });
     setTimeout(() => {
       el.remove();
-      this.cookieEl.classList.remove('punch');
-      void this.cookieEl.offsetWidth;
-      this.cookieEl.classList.add('punch');
+      // Пунч счётчика без форс-reflow (offsetWidth дёргал layout на каждую косточку)
+      if (!this.cookieEl.classList.contains('punch')) this.cookieEl.classList.add('punch');
+      else {
+        this.cookieEl.style.animation = 'none';
+        requestAnimationFrame(() => { this.cookieEl.style.animation = ''; });
+      }
     }, 380);
   }
 

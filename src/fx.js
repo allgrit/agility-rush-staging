@@ -95,7 +95,7 @@ export class Fx {
     for (let i = 0; i < 40; i++) this.prints.push({ slot: i, life: 0, x: 0, z: 0, size: 1 });
     this.printIdx = 0;
     // Радужный след: батч additive-квадов
-    this.trailBatch = mkBatch(scene, new THREE.PlaneGeometry(0.5, 0.22), 24,
+    this.trailBatch = mkBatch(scene, new THREE.PlaneGeometry(0.3, 0.12), 24,
       { color: 0xffffff, transparent: true, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false });
     this.trailBatch.im.count = 24;
     this.trailSegs = [];
@@ -230,7 +230,7 @@ export class Fx {
   trail(pos, comboLevel, dt) {
     this.trailTimer -= dt;
     if (this.trailTimer > 0) return;
-    this.trailTimer = 0.03;
+    this.trailTimer = 0.07; // реже: плотный поток ярких квадов стробил (жалоба «эпилепсия»)
     const seg = this.trailSegs[this.trailIdx];
     this.trailIdx = (this.trailIdx + 1) % this.trailSegs.length;
     seg.pos.copy(pos);
@@ -294,7 +294,7 @@ export class Fx {
       if (s.life > 0) {
         s.life -= dt;
         s.scale *= (1 - dt * 1.5);
-        this.trailBatch.op.setX(s.slot, Math.max(0, s.life * 1.4));
+        this.trailBatch.op.setX(s.slot, Math.min(0.3, Math.max(0, s.life * 0.6))); // кап яркости: additive-стробы утомляли
         if (s.life <= 0) _pM.copy(this.trailBatch.zero);
         else { _pS.setScalar(s.scale); _pM.compose(s.pos, _pQ.identity(), _pS); }
         this.trailBatch.im.setMatrixAt(s.slot, _pM);

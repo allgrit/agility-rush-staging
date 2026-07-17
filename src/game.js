@@ -192,6 +192,7 @@ export class Game {
     this.distance = 0;
     this.score = 0;
     this.combo = 0;
+    this.chain = null; // активная «Связка» F2: {id, len, cleared, dead} — бонус за полное прохождение
     this.cookieStreak = 0; this.cookieStreakT = 0;
     this.powerups = { magnet: 0, shield: 0, rocket: 0, multi: 0 };
     this.powerupMax = { magnet: 8, shield: 1, rocket: 4.5, multi: 10 };
@@ -203,7 +204,7 @@ export class Game {
     this.runStats = {
       score: 0, distance: 0, cookies: 0, maxCombo: 0, perfects: 0, faults: 0,
       cleanObstacles: 0, cleanHurdles: 0, perfectWeaves: 0, tunnels: 0, tables: 0,
-      powerups: 0, cleanStreakDist: 0, _streakStart: 0,
+      powerups: 0, cleanStreakDist: 0, _streakStart: 0, chains: 0,
       // Счётчики ачивок (накопятся в meta при завершении забега)
       nearMiss: 0, flights: 0, judgeEscapes: 0, revives: 0, nightReached: 0,
     };
@@ -619,6 +620,9 @@ export class Game {
     hs.cookies = this.runStats.cookies;
     hs.combo = this.combo;
     hs.comboFresh = this._comboProgress();
+    // Прогресс активной «Связки» (F2): показываем n/len пока игрок внутри связки (не мёртвой).
+    hs.chainN = (this.chain && !this.chain.dead && this.chain.cleared < this.chain.len) ? this.chain.cleared : 0;
+    hs.chainLen = hs.chainN ? this.chain.len : 0;
     hs.powerups = this.powerups;     // живые ссылки: updateHUD читает поля СРАЗУ и не хранит ссылку
     hs.powerupMax = this.powerupMax; // (безопасно, как и было до диффинга)
     hs.danger = this.judgeT > 0;
@@ -1417,10 +1421,45 @@ export class Game {
       this.fx.confetti(new THREE.Vector3(d.x, 1.4, d.z - 2));
       this.audio.applause();
     }
+    // «Связка» (F2): прогресс по помеченным снарядам; полное чистое прохождение — видимый бонус.
+    if (e && e.chainId != null) {
+      if (!this.chain || this.chain.id !== e.chainId) {
+        this.chain = { id: e.chainId, len: e.chainLen, cleared: 0, base: 0, dead: false };
+        // Вход в связку: объявляем цель (флажки с номерами уже видны на снарядах впереди).
+        // Позиция выше зоны чтения снарядов (над горизонтом), по центру — не перекрывает обзор.
+        this.popups.custom('🔗 СВЯЗКА ×' + this.chain.len, 'chainpop', 50, 24);
+      }
+      if (!this.chain.dead) {
+        this.chain.cleared++;
+        // Копим БАЗОВУЮ цену снарядов (сложность): зоновые снаряды дороже базовых → их связка
+        // платит больше. Бонус масштабируется комбо (крупный джекпот «в моменте»), но НЕ perfect
+        // и НЕ бустами — иначе у безошибочного грайндера компаундится и ломает макс рейтинг
+        // (модель: с этой схемой ×1.5 у рекордсмена вместо ×3.6).
+        this.chain.base += (SCORE_BY_KIND[e && e.kind] || SCORE_CLEAN);
+        if (this.chain.cleared >= this.chain.len) {
+          // Бонус = сложность × множитель-длины × комбо(кап ×10) × meta.
+          const cm = Math.min(SCORE_COMBO_CAP, Math.max(1, this.combo));
+          const chainMult = ({ 2: 2, 3: 3, 4: 4 })[this.chain.len] || this.chain.len;
+          const bonus = Math.floor(this.chain.base * chainMult * cm * (this.metaMult || 1));
+          this.score += bonus;
+          this.runStats.chains++;
+          this.rig.rollPulse();
+          this.world.cheer(d.z, 2.0); // связка = крупная волна трибун
+          this.audio.comboMilestone(Math.max(40, this.chain.len * 10));
+          // Центр по горизонтали + выше зоны чтения снарядов — крупный бонус не уезжает за край и не мешает обзору.
+          this.popups.custom('СВЯЗКА ⚡×' + chainMult + '  +' + bonus.toLocaleString('ru'), 'chainpop', 50, 28);
+          this.fx.confetti(new THREE.Vector3(d.x, 1.6, d.z - 2));
+          this.fx.perfectBurst(new THREE.Vector3(d.x, d.y + 0.6, d.z));
+          this.ui.flash('rgba(70,210,255,0.30)');
+          this.chain = null;
+        }
+      }
+    }
   }
 
   _fault(e, reason) {
     this.combo = 0;
+    if (this.chain && !this.chain.dead) this.chain.dead = true; // любой фолт рвёт активную связку
     this.runStats.faults++;
     this.runStats._streakStart = this.distance;
     this._recordObstacle(e && e.kind, 'fault');
@@ -1799,6 +1838,9 @@ export class Game {
     if (d.stumbleInvulnT > 0) return;
     if (this.ftue) { this._ftueFail(); return; }
     if (this.judgeT > 0) { this._death(null, true); return; } // второй фолт при судье — дисквалификация
+    // Любое «грязное» прохождение (даже soft-stumble без фолта, напр. проваленный вход в тоннель)
+    // рвёт активную «Связку»: бонус — только за ПОЛНОСТЬЮ чистую последовательность.
+    if (this.chain && !this.chain.dead) this.chain.dead = true;
     // Sonic-паттерн: часть косточек рассыпается вперёд — их можно переподобрать.
     // Спавн откладываем: _stumble может вызываться из for...of по track.entities
     const scatter = Math.min(10, Math.floor(this.runStats.cookies * 0.2));
@@ -1835,7 +1877,8 @@ export class Game {
   }
 
   _death(e, disqualified = false) {
-    if (this.ftue && this.state === 'running') { this._ftueFail(); return; }
+    if (this.ftue && this.state === 'running') { this._ftueFail(); return; } // в обучении смерти нет
+    if (this.chain && !this.chain.dead) this.chain.dead = true; // смерть/дисквал/спасение рвёт связку
     // Тягач ловит удар: спасает от краша и ломается (в зубы). Одноразово в окне tugT.
     if (this.tugT > 0 && this.state === 'running') { this._tugCrashSave(e); return; }
     this._lastHazardKind = e && e.kind ? e.kind : (disqualified ? 'judge' : 'stumble');
