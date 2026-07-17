@@ -119,7 +119,7 @@ export class CameraRig {
 
     // Шейк: события + микро-тряска на высокой скорости
     let sx = 0, sy = 0;
-    const speedShake = spd > 0.7 ? (spd - 0.7) * 0.075 : 0; // тряска раньше и сильнее — «на пределе»
+    const speedShake = spd > 0.7 ? (spd - 0.7) * 0.042 : 0; // мягче: на макс. скорости трясло чрезмерно (фидбек)
     const amp = Math.max(this.shakeAmp, speedShake);
     if (amp > 0.001) {
       sx = (Math.sin(this.shakeT * 1.3) + Math.sin(this.shakeT * 2.7)) * 0.5 * amp;
