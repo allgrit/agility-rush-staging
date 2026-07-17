@@ -374,7 +374,8 @@ export class RiggedDog {
     const lean = pose.lean || 0;
     const weave = mode === 'weave' ? (pose.weaveLean || 0) : 0;
     const balance = mode === 'balance' ? (pose.balance || 0) : 0;
-    this.model.rotation.z = lean + weave * 0.85 + balance * 0.65;
+    // Минус у balance: rotation.z>0 визуально валит ВЛЕВО, а balance>0 = падение ВПРАВО
+    this.model.rotation.z = lean + weave * 0.85 - balance * 0.65;
     this.model.rotation.y = (lean + weave) * 0.28;
     const animationPitch = (mode === 'jump' || mode === 'takeoff')
       ? THREE.MathUtils.clamp(-(pose.vy || 0) * 0.035, -0.28, 0.34)

@@ -437,7 +437,9 @@ export class Game {
     if (this.boostT > 0) { this.boostT -= dt; target *= 1.25; }
     if (this.tugT > 0) target *= TUG_SPEED; // тягач тянет вперёд
     if (this.flyT > 0) target *= 1.3;
-    if (this.weave) target *= 0.62;
+    // Слалом: жёсткий кап скорости — при 16 м/с стойка шла каждые 0.09 с (11 тапов/с,
+    // perfect недостижим физически). 6.8 м/с = ~0.22 с на стойку: сложно, но честно.
+    if (this.weave) target = Math.min(target * 0.62, 6.8);
     if (this.onApparatus) {
       if (this.onApparatus.kind === 'aframe') target *= 0.5;
       else if (this.onApparatus.kind === 'seesaw') target *= 0.4; // качели: чуть тише — успеть прижаться на пике
