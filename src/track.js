@@ -273,8 +273,8 @@ export class Track {
         if (k === 'hurdle' || k === 'tire') this._cookieArc(lane, lz); // хлебные крошки-подсказки
         // Метки связки: game.js трекает прогресс и выдаёт бонус за полное прохождение.
         rec.chainId = cid; rec.chainIndex = i; rec.chainLen = len;
-        // Флажок СБОКУ от снаряда: левая полоса → флажок СЛЕВА, центр/правая → СПРАВА (правило игрока).
-        rec.group.add(makeChainMarker(i + 1, TOP_Y[k], lane === 0 ? -0.9 : 0.9));
+        // Флажок ВСЕГДА справа от снаряда (единообразно на всех полосах — так решил игрок).
+        rec.group.add(makeChainMarker(i + 1, TOP_Y[k], 0.9));
         lz -= gap;
         if (rng.chance(0.4)) lane = Math.max(0, Math.min(2, lane + rng.pick([-1, 1])));
       }
