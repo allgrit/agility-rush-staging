@@ -135,6 +135,11 @@ export class Game {
     try { _learned = JSON.parse(localStorage.getItem('agility_tut_learned') || '{}'); } catch { _learned = {}; }
     this.tutorial = { active: false, count: {}, learned: _learned, curType: null, curTarget: null };
     this.ftue = null; // активное блокирующее обучение (см. FTUE_STAGES)
+    // Свет Пуллера — в сцене с самого старта (intensity 0): добавление источника
+    // света на лету инвалидирует программы ВСЕЙ сцены → массовая рекомпиляция
+    // шейдеров = секундный фриз при активации (жалоба «зависает даже на мощном»)
+    this._tugLight = new THREE.PointLight(0xb98cff, 0, 3.6, 2);
+    this.scene.add(this._tugLight);
     this.timeScale = 1;
     this.slowmoT = 0;
     this._resetRunState();
@@ -1944,7 +1949,7 @@ export class Game {
     const fx = new THREE.Group();
     // Без облака-ореола: сияние наносим на саму шкурку собаки (emissive, см. _applyDogGlow).
     // Точечный свет даёт лёгкую фиолетовую подсветку модели.
-    const light = new THREE.PointLight(0xb98cff, 2.2, 3.6, 2); light.position.set(0, 0.55, 0.25); fx.add(light);
+    const light = this._tugLight; // постоянный житель сцены (см. конструктор)
     const boltDraw = (ctx, s) => { ctx.strokeStyle = '#ffe23a'; ctx.lineWidth = s * 0.1; ctx.lineJoin = 'round'; ctx.shadowColor = '#fff2a0'; ctx.shadowBlur = s * 0.08; ctx.beginPath(); ctx.moveTo(s * 0.6, s * 0.1); ctx.lineTo(s * 0.38, s * 0.5); ctx.lineTo(s * 0.55, s * 0.52); ctx.lineTo(s * 0.34, s * 0.9); ctx.stroke(); };
     // 2 молнии, ниже уровня головы и полупрозрачные — сбоку, НЕ перекрывают трассу и верх.
     const bolts = [[-0.5, 0.32], [0.52, 0.4]].map(([x, y]) => { const b = spr(boltDraw); b.scale.setScalar(0.16); b.material.opacity = 0.5; b.position.set(x, y, 0.05); fx.add(b); return b; });
@@ -1965,7 +1970,11 @@ export class Game {
     if (active) v.endT = 0.6; else if (v.endT > 0) v.endT -= dtRaw;
     const on = active || v.endT > 0;
     if (v.group.visible !== on) { v.group.visible = on; v.fx.visible = on; }
-    if (!on) { if (this._dogGlowOn) { this._applyDogGlow(dm, 0); this._dogGlowOn = false; } this._tugSaved = false; return; }
+    if (!on) {
+      if (this._dogGlowOn) { this._applyDogGlow(dm, 0); this._dogGlowOn = false; }
+      this._tugLight.intensity = 0;
+      this._tugSaved = false; return;
+    }
     this._dogGlowOn = true;
     this._tugVisT = (this._tugVisT || 0) + dtRaw;
     const t = this._tugVisT;
@@ -1981,7 +1990,8 @@ export class Game {
     // Ориентация задаётся В МИРЕ (ровно, без крена за собакой).
     if (toMouth > 0.6) v.ring.rotation.set(Math.PI / 2, 0, 0);        // в зубах — горизонтально плашмя
     else v.ring.rotation.set(0.12, 0, v.ring.rotation.z + dtRaw * 4);  // впереди — лицом к камере, ровно
-    v.fx.position.set(p.x, headY, p.z);           // свет/молнии вокруг собаки в мире
+    v.fx.position.set(p.x, headY, p.z);           // молнии вокруг собаки в мире
+    this._tugLight.position.set(p.x, headY + 0.55, p.z + 0.25);
     const pulse = 0.85 + Math.sin(t * 5) * 0.15;
     v.light.intensity = 2.2 * pulse;
     for (const b of v.bolts) b.material.opacity = 0.5 * pulse;
