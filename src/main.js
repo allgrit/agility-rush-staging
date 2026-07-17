@@ -5,6 +5,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { Game, FIXED_DT } from './game.js';
 import { shouldUseRiggedDog } from './rigged_host.js';
+import { IS_VK, useServiceWorker, initPlatform, resolveVKName, watchVKView, haptic, cloudBackup, cloudRestore } from './platform.js';
 
 // Bootstrap: рендерер, цикл с аккумулятором, ввод, харнесс для покадровой съёмки.
 
@@ -137,15 +138,56 @@ if (!new URLSearchParams(location.search).has('harness')) {
   }).catch(() => {});
 }
 
+// В VK-режиме помечаем body — CSS прячет уводящие ссылки (диари) без правок HTML.
+if (IS_VK) document.body.classList.add('vk');
+
+// Инициализация площадки (VK Mini App: VKWebAppInit ≤30с + имя игрока из профиля VK,
+// если ещё не задано). На web — no-op. Не блокирует старт игры.
+initPlatform().then(async () => {
+  if (IS_VK) watchVKView(onAppHide, onAppShow);
+  if (IS_VK) {
+    window.__haptic = haptic; // вибро-хуки в game.js (no-op вне VK)
+    // Облачный сейв: на чистом устройстве тихо подхватываем прогресс из VK-облака,
+    // дальше бэкапим ядро прогресса раз в минуту и при сворачивании
+    const restored = await cloudRestore(game.meta, () => game.state === 'menu');
+    if (restored) game.showMenu(); // перерисовать меню с восстановленным прогрессом
+    window.__vkBackupTimer = window.__vkBackupTimer || setInterval(() => cloudBackup(game.meta), 60000);
+    // бэкап при сворачивании делает onAppHide (единая точка, без дублей слушателей)
+    // Автообновление в VK: WebView живёт долго; при возврате в приложение сверяем
+    // версию с сервером (index отдаётся с no-cache) и мягко перезагружаемся в меню.
+    const vkVersionCheck = async () => {
+      try {
+        const html = await fetch('./index.html', { cache: 'no-store' }).then((r) => r.text());
+        const m = html.match(/__BUILD = '([^']+)'/);
+        if (m && m[1] !== window.__BUILD && game.state === 'menu') {
+          const guard = '__vk_up_' + m[1];
+          if (!sessionStorage.getItem(guard)) {
+            sessionStorage.setItem(guard, '1');
+            cloudBackup(game.meta);
+            location.reload(); // query с vk_app_id сохраняется
+          }
+        }
+      } catch { /* офлайн — не мешаем играть */ }
+    };
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) vkVersionCheck(); });
+    setTimeout(vkVersionCheck, 4000);
+  }
+  if (IS_VK && !game.meta.data.playerName) {
+    const nm = await resolveVKName();
+    if (nm) { game.meta.setPlayerName(nm); game.meta.save(); }
+  }
+}).catch(() => {});
+
 // Кнопка паузы в HUD
 document.getElementById('pause-btn').addEventListener('click', () => game.togglePause());
 
-// Сворачивание в фон (переключение вкладки, блокировка экрана): глушим весь звук и
-// ставим забег на паузу, иначе музыка/эффекты продолжают играть «за спиной». Паузу при
-// возврате не снимаем — игрок продолжит сам.
+// Сворачивание в фон (переключение вкладки, блокировка экрана, VK Mini App свёрнут):
+// глушим весь звук и ставим забег на паузу, иначе музыка/эффекты играют «за спиной».
+// Актуально и для web, и для VK. Паузу при возврате не снимаем — игрок продолжит сам.
 function onAppHide() {
   game.audio.suspend();
   if (game.state === 'running') game.togglePause();
+  if (IS_VK) cloudBackup(game.meta); // прогресс в облако при каждом сворачивании
 }
 function onAppShow() {
   if (!document.hidden) game.audio.resume();
@@ -177,8 +219,14 @@ if (tugBtn) tugBtn.addEventListener('click', (e) => {
   }
 });
 
+// В VK-режиме глушим любой ранее зарегистрированный SW (iframe не должен управляться
+// стейлом от прежнего web-захода на этот же origin).
+if (IS_VK && 'serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations().then((rs) => rs.forEach((r) => r.unregister())).catch(() => {});
+}
+
 // Service Worker: офлайн + бесшовные апдейты (не в харнессе — детерминизм)
-if ('serviceWorker' in navigator && !new URLSearchParams(location.search).has('harness')) {
+if ('serviceWorker' in navigator && useServiceWorker && !new URLSearchParams(location.search).has('harness')) {
   const registerServiceWorker = () => {
     // updateViaCache:'none' — sw.js всегда качается свежим, минуя HTTP-кэш (важно для Pages)
     navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).then((reg) => {

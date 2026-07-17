@@ -55,9 +55,9 @@ const FTUE_STAGES = [
   { kind: 'weave', title: 'СЛАЛОМ', needClean: true },
   { kind: 'tire', title: 'КОЛЬЦО', needClean: true },
   { kind: 'table', title: 'СТОЛ', needClean: true },
-  { kind: 'aframe', title: 'ГОРКА' },
-  { kind: 'dogwalk', title: 'БУМ' },
-  { kind: 'seesaw', title: 'КАЧЕЛИ' },
+  { kind: 'aframe', title: 'ГОРКА', needClean: true },
+  { kind: 'dogwalk', title: 'БУМ', needClean: true },
+  { kind: 'seesaw', title: 'КАЧЕЛИ', needClean: true },
 ];
 const FTUE_SPEED = 8.4;     // скорость во время обучения — успеть прочитать и среагировать
 const FTUE_SPAWN_AHEAD = 46; // снаряд появляется за столько метров (подсказка сразу)
@@ -455,6 +455,7 @@ export class Game {
     if (!this.ftue) this.distance += d.speed * dt; // тутор не считается пройденной дистанцией
     if (this.ftue) this._ftueTick(dt);
     if (this._ftueBannerHideT > 0) { this._ftueBannerHideT -= dt; if (this._ftueBannerHideT <= 0) this.ui.hideFtueBanner(); }
+    this.ui.setJudgeWarn(this.judgeT);
     this._trackProgress();
     this.score += d.speed * dt * (this.powerups.multi > 0 ? 2 : 1) * (this.tableBoostT > 0 ? 2 : 1) * (this.metaMult || 1);
 
@@ -714,6 +715,10 @@ export class Game {
     while (this.inputQueue.length) {
       const a = this.inputQueue.shift();
       if (this.ftue && this.ftue.phase !== 'run') continue; // на возврате управление отключено
+      // Этап слалома: до входа в змейку тапы/прыжки глушим — игроки тапали заранее,
+      // собака прыгала и «не заходила в слалом» (жалоба)
+      if (this.ftue && FTUE_STAGES[this.ftue.idx] && FTUE_STAGES[this.ftue.idx].kind === 'weave'
+        && !this.weave && (a === 'tap' || a === 'up')) continue;
       if (this.ftue) this.ftue.acted = true;
       if (d.launchedT > 0 || this.tableT > 0) continue; // управление потеряно
       if (this.weave) {
@@ -999,11 +1004,14 @@ export class Game {
       }
       if (d.z <= e.exit + 0.1) {
         e.occupied = false; e.resolved = true;
-        if (st.maxBal < 0.45) this._obstacleClean(e, 'perfect', 'БУМ');
-        else this._obstacleClean(e, 'clean', 'БУМ');
+        // Жёсткое правило (решение владельца): без свайпа в зоне схода — фолт
+        if (st.contactHit && st.maxBal < 0.45) this._obstacleClean(e, 'perfect', 'БУМ');
+        else if (st.contactHit || st.contactEarly) this._obstacleClean(e, 'clean', 'БУМ');
+        else this._fault(e, 'МИМО ЗОНЫ');
         this.onApparatus = null; this.apparatusState = null;
       }
     } else if (e.kind === 'seesaw') {
+      if (st.wantPress && !st.banged) st.wantAge = (st.wantAge || 0) + dt;
       // Окно «прижаться»: открывается заметно раньше (доска ещё едет вниз, но уже наклонена),
       // чтобы на полной скорости успеть нажать. Раз открывшись — НЕ гаснет до схода со снаряда.
       if (!st.banged && e.tilt > e.maxTilt * 0.55) {
@@ -1011,18 +1019,22 @@ export class Game {
         this.audio.seesawBang();
         this.fx.bigDust(new THREE.Vector3(d.x, 0.1, e.exit));
         this.rig.shake(0.03);
-        // Буфер: игрок нажал «вниз» чуть раньше, чем доска дошла до порога — засчитываем.
+        // Буфер: нажал чуть раньше укладки — засчитываем; СЛИШКОМ заранее — только clean
         if (st.wantPress && !st.pressed) {
-          st.pressed = true;
-          this.audio.clean();
-          this.fx.sparks(new THREE.Vector3(d.x, 0.3, d.z), 0xf2c531);
+          const buf = 0.3 + d.speed * 0.012;
+          if ((st.wantAge || 0) <= buf) {
+            st.pressed = true;
+            this.audio.clean();
+            this.fx.sparks(new THREE.Vector3(d.x, 0.3, d.z), 0xf2c531);
+          } else st.contactEarly = true;
         }
       }
       if (d.z <= e.exit + 0.05) {
         e.occupied = false; e.resolved = true;
         this.onApparatus = null;
         if (st.pressed) this._obstacleClean(e, 'perfect', 'КАЧЕЛИ');
-        else this._obstacleClean(e, 'clean', 'КАЧЕЛИ'); // прошёл без прижатия — просто чисто, без наказания
+        else if (st.contactEarly || st.wantPress) this._obstacleClean(e, 'clean', 'КАЧЕЛИ'); // нажал, но слишком заранее
+        else this._fault(e, 'МИМО ЗОНЫ'); // жёсткое правило: без прижатия — фолт
         this.apparatusState = null;
       }
     }
@@ -1031,8 +1043,11 @@ export class Game {
   _apparatusDown() {
     const e = this.onApparatus, st = this.apparatusState, d = this.dog;
     if (!e) return;
+    // Окна зон РАСШИРЯЮТСЯ со скоростью: на максималке зона пролетает за долю
+    // секунды — без этого perfect там математически недостижим (решение владельца)
+    const pad = 0.2 + d.speed * 0.04;
     if (e.kind === 'aframe') {
-      const inZone = d.z <= e.contactStart && d.z >= e.contactEnd - 0.2;
+      const inZone = d.z <= e.contactStart + pad * 0.4 && d.z >= e.contactEnd - pad;
       const onDescent = d.z < e.z;
       if (inZone && !st.contactHit) {
         st.contactHit = true;
@@ -1040,6 +1055,16 @@ export class Game {
         this.audio.clean();
         this.fx.sparks(new THREE.Vector3(d.x, d.y + 0.2, d.z), 0xf2c531);
       } else if (onDescent) st.contactEarly = true;
+    } else if (e.kind === 'dogwalk') {
+      // Свайп вниз в жёлтой зоне схода ОБЯЗАТЕЛЕН (унификация с горкой):
+      // в зоне → идеальный сход, раньше на второй половине — «заранее»
+      const zoneLen = 0.9 + d.speed * 0.05;
+      const inZone = d.z <= e.exit + zoneLen && d.z >= e.exit - 0.25;
+      if (inZone && !st.contactHit) {
+        st.contactHit = true;
+        this.audio.clean();
+        this.fx.sparks(new THREE.Vector3(d.x, d.y + 0.2, d.z), 0xf2c531);
+      } else if (d.z < e.z) st.contactEarly = true;
     } else if (e.kind === 'seesaw') {
       if (st.pressed) return;
       if (st.banged) {
@@ -1047,7 +1072,9 @@ export class Game {
         this.audio.clean();
         this.fx.sparks(new THREE.Vector3(d.x, 0.3, d.z), 0xf2c531);
       } else {
-        st.wantPress = true; // нажал до пика — засчитаем, как только доска ляжет (буфер)
+        // Нажал до укладки доски: буфер зависит от скорости; слишком заранее — «просто»
+        st.wantPress = true;
+        st.wantAge = 0;
       }
     }
   }
@@ -1143,6 +1170,14 @@ export class Game {
         const ddx = Math.abs(d.x - ex);
         if (dz < (e.halfD + 0.3) && ddx < (e.halfW + 0.28)) {
           if (e.kind === 'cone') {
+            if (d.y > 0.5) { // перелетел конус (высота 0.55) — удара нет, это трюк
+              if (!e._overJumped) {
+                e._overJumped = true;
+                this.runStats.nearMiss = (this.runStats.nearMiss || 0) + 1;
+                this.popups.custom('НАД КОНУСОМ!', 'scorepop', 50, 44);
+              }
+              continue;
+            }
             if (!e.hit) {
               e.hit = true;
               e.vel = new THREE.Vector3((d.x < ex ? 1 : -1) * 3, 4, -2);
@@ -1386,6 +1421,7 @@ export class Game {
 
   _obstacleClean(e, grade, name, baseScore) {
     if (this.ftue && this.ftue.target === e) this.ftue.cleanOk = true;
+    if (grade === 'perfect' && window.__haptic) window.__haptic('light'); // вибро-джус (VK)
     const d = this.dog;
     this._recordObstacle(e && e.kind, grade);
     this.combo++;
@@ -1463,6 +1499,12 @@ export class Game {
   }
 
   _fault(e, reason) {
+    // Первый фолт в жизни игрока: объясняем правило судейства (плашка, без паузы)
+    if (!this.meta.data.judgeRuleSeen && !this.ftue) {
+      this.meta.data.judgeRuleSeen = true;
+      this.meta.save();
+      this.ui.showJudgeRule();
+    }
     this.combo = 0;
     if (this.chain && !this.chain.dead) this.chain.dead = true; // любой фолт рвёт активную связку
     this.runStats.faults++;
@@ -1714,9 +1756,15 @@ export class Game {
       f.target = this.track.spawnOne(st.kind, d.lane, z);
       f.targets = [f.target];
       const g = TUT_GESTURE[st.kind];
-      this.ui.showTutHint(g.name, g.dir, this.isTouch ? g.touch : g.key, this.isTouch);
-      this.ui.showFtueBanner(`ШАГ ${f.idx + 1}/${FTUE_STAGES.length} · ${st.title}`,
-        this.isTouch ? g.touch : g.key);
+      if (st.kind === 'weave') {
+        // Двухфазно: до входа не показываем «ТАПАЙ» (игроки начинали тапать заранее)
+        this.ui.showFtueBanner(`ШАГ ${f.idx + 1}/${FTUE_STAGES.length} · ${st.title}`,
+          'Впереди слалом — ЖДИ входа, потом тапай!');
+      } else {
+        this.ui.showTutHint(g.name, g.dir, this.isTouch ? g.touch : g.key, this.isTouch);
+        this.ui.showFtueBanner(`ШАГ ${f.idx + 1}/${FTUE_STAGES.length} · ${st.title}`,
+          this.isTouch ? g.touch : g.key);
+      }
     }
     track('ftue_stage_start', { i: f.idx, kind: st.kind, tries: f.tries });
   }
@@ -1731,6 +1779,13 @@ export class Game {
         return;
       }
       const st = FTUE_STAGES[f.idx];
+      // Слалом: лапа «ТАП» появляется в момент ВХОДА в змейку
+      if (!f.hint2 && st.kind === 'weave' && this.weave) {
+        f.hint2 = true;
+        const g = TUT_GESTURE.weave;
+        this.ui.showTutHint(g.name, g.dir, this.isTouch ? g.touch : g.key, this.isTouch);
+        this.ui.showFtueBanner(`ШАГ ${f.idx + 1}/${FTUE_STAGES.length} · ${st.title}`, 'ТАПАЙ на каждую стойку!');
+      }
       // Контактные снаряды: у спуска/конца — вторая подсказка про жёлтую зону
       if (!f.hint2 && (st.kind === 'dogwalk' || st.kind === 'aframe') && this.onApparatus === f.target) {
         const exitZ = f.target.exit != null ? f.target.exit : f.target.z;
@@ -1765,7 +1820,7 @@ export class Game {
   _ftueSuccess() {
     const f = this.ftue;
     track('ftue_stage_done', { i: f.idx, kind: FTUE_STAGES[f.idx].kind, tries: f.tries });
-    this.meta.data.bones = (this.meta.data.bones || 0) + 5;
+    this.meta.data.cookies = (this.meta.data.cookies || 0) + 5; // ревью: bones — поле-призрак, валюта cookies
     this.popups.custom((f.tries === 0 ? 'ОТЛИЧНО! ' : 'ПОЛУЧИЛОСЬ! ') + '+5 🦴', 'scorepop', 50, 40);
     this.audio.perfect(1);
     this.ui.hideTutHint();
@@ -1816,7 +1871,7 @@ export class Game {
     track('ftue_done', {});
     this.meta.data.ftueDone = true;
     this.meta.data.ftueStage = 0;
-    this.meta.data.bones = (this.meta.data.bones || 0) + 100;
+    this.meta.data.cookies = (this.meta.data.cookies || 0) + 100;
     // Старые контекстные подсказки не дублируем: всё уже показали
     for (const k of Object.keys(TUT_GESTURE)) this.tutorial.learned[k] = true;
     this._tutSave && this._tutSave();
@@ -1826,7 +1881,7 @@ export class Game {
     this.combo = 0;
     this.cookieStreak = 0;
     this.ui.hideFtueSkip();
-    this.ui.showFtueBanner('ОБУЧЕНИЕ ПРОЙДЕНО! 🎉', '+100 🦴 — а теперь настоящий забег!');
+    this.ui.showFtueBanner('ОБУЧЕНИЕ ПРОЙДЕНО! 🎉', '+100 🦴 · Помни: два фолта при судье — конец забега!');
     this.popups.custom('+100 🦴', 'scorepop', 50, 36);
     this.audio.fanfare ? this.audio.fanfare() : this.audio.perfect(3);
     const self = this;
@@ -1865,6 +1920,7 @@ export class Game {
     d.stunT = 0.7;
     this.rig.shake(0.09);
     this.audio.stumble();
+    if (window.__haptic) window.__haptic('heavy'); // удар телом — вибро (VK)
     if (withFault) this._fault(null, reason || 'СПОТКНУЛСЯ!');
     this.fx.crash(new THREE.Vector3(d.x, 0.3, d.z));
     // «Плавный старт»: в стартовой зоне судья не выбегает (39% умирали до 500 м, судья —
@@ -1927,6 +1983,7 @@ export class Game {
     if (!this.meta.useConsumable('tug')) return false;           // нет в наличии
     this.tugT = TUG_SECS;
     this._tugJustOn = true;
+    if (window.__haptic) window.__haptic('medium'); // активация пуллера — вибро (VK)
     if (!this.meta.data.tugUsed) { this.meta.data.tugUsed = true; this.meta.save(); } // гасим подсказку «тап сюда»
     this.audio.boost();
     this.popups.custom('ПУЛЛЕР!', 'perfect', 50, 40);

@@ -4,6 +4,7 @@ import { track } from './analytics.js';
 import { APP_VERSION } from './version.js';
 import { catalog, RARITY, priceOf, itemOf } from './cosmetics.js';
 import { ACH_SECTIONS, ACH_REWARDS, fmtVal } from './achievements.js';
+import { IS_VK, shareScore, addToFavorites, recommendApp, homeScreenSupported, addToHomeScreen } from './platform.js';
 
 // Весь HUD и меню — DOM поверх канваса: чётче текст, дешевле анимации (CSS).
 
@@ -95,6 +96,11 @@ export class UI {
         <button class="start-btn" id="start-btn">СТАРТ</button>
         <div class="controls-hint">← → полосы · ↑ прыжок · ↓ подкат
           <button class="ftue-menu-btn" id="ftue-menu-btn">🎓 обучение</button></div>
+        ${IS_VK ? `<div class="vk-grow">
+          <button id="vk-fav">⭐ В избранное</button>
+          <button id="vk-rec">📣 Порекомендовать</button>
+          <button id="vk-home" style="display:none">📲 На экран</button>
+        </div>` : ''}
         <div class="meta-scroll">
         <!-- Панель «Задания»: миссии + слово дня + дейлики -->
         <div class="meta-panel on" data-panel="quests">
@@ -172,6 +178,27 @@ export class UI {
     this.menuEl.querySelector('#start-btn').addEventListener('click', onStart);
     const ftueBtn = this.menuEl.querySelector('#ftue-menu-btn');
     if (ftueBtn) ftueBtn.addEventListener('click', () => { track('ftue_menu_click', {}); this._onFtue && this._onFtue(); });
+    // VK: кнопки роста (избранное/рекомендация/иконка на экран — Android)
+    if (IS_VK) {
+      const fav = this.menuEl.querySelector('#vk-fav');
+      const rec = this.menuEl.querySelector('#vk-rec');
+      const home = this.menuEl.querySelector('#vk-home');
+      if (fav) fav.addEventListener('click', async () => { track('vk_fav', {}); if (await addToFavorites()) fav.textContent = '⭐ В избранном!'; });
+      if (rec) rec.addEventListener('click', async () => { track('vk_recommend', {}); if (await recommendApp()) rec.textContent = '📣 Спасибо!'; });
+      // Поддержку «на экран» спрашиваем один раз и кэшируем: меню перерисовывается
+      // innerHTML-ом, и промис легко резолвится в уже отсоединённый элемент
+      if (home) {
+        if (this._homeScreenOk === undefined) {
+          this._homeScreenOk = null; // «запрошено»
+          homeScreenSupported().then((ok) => {
+            this._homeScreenOk = ok;
+            const el = this.menuEl.querySelector('#vk-home');
+            if (ok && el) el.style.display = '';
+          });
+        } else if (this._homeScreenOk) home.style.display = '';
+        home.addEventListener('click', async () => { track('vk_homescreen', {}); if (await addToHomeScreen()) home.textContent = '📲 Готово!'; });
+      }
+    }
     this.menuEl.querySelectorAll('.diary-link').forEach(el => el.addEventListener('click', () => track('diary_click', { from: 'menu' })));
     // Tap-to-play (парадигма SS): клик по баннеру = старт забега
     const heroPlay = this.menuEl.querySelector('#hero-play');
@@ -774,6 +801,35 @@ export class UI {
     el.onclick = () => { onSkip && onSkip(); };
   }
 
+  // Плашка судьи: игроки не понимали механику проигрыша («жизней» нет — есть судья)
+  setJudgeWarn(judgeT) {
+    const el = document.getElementById('judge-warn');
+    if (!el) return;
+    const on = judgeT > 0;
+    if (on !== this._judgeOn) {
+      this._judgeOn = on;
+      el.style.display = on ? 'flex' : 'none';
+      if (!on) el.classList.remove('rule');
+    }
+    if (on) {
+      const secs = Math.ceil(judgeT);
+      if (secs !== this._judgeSecs) {
+        this._judgeSecs = secs;
+        el.querySelector('.jw-t').textContent = `⚠ СУДЬЯ СЛЕДИТ — без ошибок ${secs} с`;
+      }
+    }
+  }
+
+  // Первый фолт: расширенное правило (текст, без паузы — решение владельца)
+  showJudgeRule() {
+    const el = document.getElementById('judge-warn');
+    if (!el) return;
+    el.classList.add('rule');
+    const r = el.querySelector('.jw-rule');
+    if (r) r.textContent = 'ФОЛТ! За ошибку выбегает судья. Ещё одна ошибка, пока он рядом, — дисквалификация!';
+    setTimeout(() => el.classList.remove('rule'), 6000);
+  }
+
   hideFtueSkip() {
     const el = document.getElementById('ftue-skip');
     if (el) { el.style.display = 'none'; el.onclick = null; }
@@ -1033,11 +1089,17 @@ export class UI {
           <button class="start-btn" id="again-btn">ЕЩЁ ЗАБЕГ</button>
           <button class="menu-btn" id="menu-btn">МЕНЮ</button>
         </div>
+        ${IS_VK ? '<button class="menu-btn share-vk" id="share-vk-btn">📢 Поделиться результатом</button>' : ''}
         <a class="diary-link" id="diary-link" href="https://vk.com/chloe.myaussie" target="_blank" rel="noopener">🐾 Понравилось? Хлоя ведёт дневник <span class="vk">ВКонтакте ›</span></a>
       </div>`;
     this.overEl.querySelector('#again-btn').addEventListener('click', onRestart);
     this.overEl.querySelector('#menu-btn').addEventListener('click', onMenu);
     this.overEl.querySelector('#diary-link').addEventListener('click', () => track('diary_click', { from: 'gameover' }));
+    const shareBtn = this.overEl.querySelector('#share-vk-btn');
+    if (shareBtn) shareBtn.addEventListener('click', () => {
+      track('vk_share', { from: 'gameover' });
+      shareScore(Math.round(runStats.distance || 0), Math.round(runStats.score || 0));
+    });
     if (runStats.cookies > 0) setTimeout(() => this.rewardFlight(runStats.cookies), 500);
   }
 

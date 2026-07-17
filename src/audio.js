@@ -24,7 +24,7 @@ export class Audio {
 
   resume() { if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume().catch(() => {}); }
 
-  // Глушим весь звук, замораживая аудио-контекст (сворачивание вкладки/блокировка экрана).
+  // Глушим весь звук, замораживая аудио-контекст (сворачивание вкладки/VK Mini App в фон).
   suspend() { if (this.ctx && this.ctx.state === 'running') this.ctx.suspend().catch(() => {}); }
 
   _now() { return this.ctx ? this.ctx.currentTime : 0; }

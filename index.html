@@ -8,8 +8,8 @@
   // Bootstrap-версия: index.html грузится всегда свежим (network-first / без SW),
   // поэтому знает актуальную сборку. Если у игрока в кэше старьё — один раз чистим
   // все кэши, разрегистрируем старый SW и перезагружаемся. Разрывает «залипание» SW.
-  window.__BUILD = 'staging-v49-full-prod-sync';
-  window.__CACHE = 'agility-staging-v49'; // должно совпадать с VERSION в sw.js
+  window.__BUILD = 'staging-v50-zones-judge';
+  window.__CACHE = 'agility-staging-v50'; // должно совпадать с VERSION в sw.js // должно совпадать с VERSION в sw.js
   (function () {
     try {
       var qs = new URLSearchParams(location.search);
@@ -106,7 +106,7 @@
     --blue: #4a9ad8;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { width: 100%; height: 100%; overflow: hidden; background: #0d1522; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0d1522; overscroll-behavior: none; }
   body { font-family: 'Segoe UI', 'Arial', sans-serif; -webkit-user-select: none; user-select: none; touch-action: none; }
   #menu, #gameover { touch-action: auto; }
   #game-canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
@@ -346,6 +346,15 @@
     color: #9fb4d8; font: 700 12px/1 inherit; padding: 5px 10px; cursor: pointer;
     vertical-align: middle;
   }
+  #judge-warn {
+    position: absolute; top: 58px; left: 50%; transform: translateX(-50%);
+    display: none; flex-direction: column; align-items: center; gap: 3px;
+    background: rgba(60, 34, 6, 0.88); border: 2px solid #ffb02e; border-radius: 12px;
+    padding: 7px 16px; z-index: 26; pointer-events: none; text-align: center; max-width: 88vw;
+  }
+  #judge-warn .jw-t { font-weight: 900; font-size: 15px; color: #ffd587; letter-spacing: .4px; }
+  #judge-warn .jw-rule { display: none; font-weight: 700; font-size: 13px; color: #ffe9c4; }
+  #judge-warn.rule .jw-rule { display: block; }
   #ftue-banner {
     position: absolute; top: 9%; left: 50%; transform: translateX(-50%);
     display: none; flex-direction: column; align-items: center; gap: 4px;
@@ -669,6 +678,22 @@
   /* Плашка дневника центрируется внутри панелей меты (панель выровнена по левому краю) */
   .meta-panel .diary-link { display: flex; width: fit-content; margin: 8px auto 2px; }
   .over-card .diary-link { margin-top: 14px; }
+  /* VK: ряд кнопок роста под подсказками управления */
+  .vk-grow { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-top: 6px; }
+  .vk-grow button {
+    background: rgba(74, 118, 212, 0.16); border: 1px solid rgba(140, 175, 255, 0.4);
+    color: #b8ccf5; border-radius: 10px; padding: 6px 10px; font: 700 12px/1 inherit; cursor: pointer;
+  }
+  .vk-grow button:active { transform: scale(0.96); }
+  /* VK Mini App: прячем уводящие внешние ссылки (правила площадки) */
+  body.vk .diary-link { display: none !important; }
+  /* VK-шеринг результата: акцентная кнопка в VK-фирменном синем, только в оверлее gameover */
+  .over-btns + .share-vk {
+    display: block; width: 100%; margin-top: 10px;
+    background: linear-gradient(180deg, #4a76d4, #3862b8);
+    border: 1px solid rgba(140,175,255,0.55); color: #fff; font-weight: 800;
+  }
+  .over-btns + .share-vk:hover { background: linear-gradient(180deg, #5684e6, #4270cc); }
   #version-badge {
     position: fixed; right: 8px; bottom: 6px; z-index: 60; pointer-events: auto;
     color: rgba(200,214,236,0.5); font-size: 10px; letter-spacing: 0.5px;
@@ -822,6 +847,7 @@
     <div id="tut-hint"></div>
     <div id="ftue-banner"></div>
     <button id="ftue-skip">Пропустить обучение ›</button>
+    <div id="judge-warn"><span class="jw-t"></span><span class="jw-rule"></span></div>
     <div id="update-banner">Доступно обновление игры <button id="update-apply">Обновить</button></div>
     <div id="mission-toast"></div>
   </div>
