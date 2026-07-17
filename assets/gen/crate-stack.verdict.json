@@ -1,0 +1,15 @@
+{
+  "attempt": 3,
+  "score": 3,
+  "accept": false,
+  "problems": [
+    "Model incorrectly reconstructs the concept as two stacked carriers/duplicated objects instead of one clear prop",
+    "Front cage door and side/back vents collapse into messy triangular internal shards rather than clean bars and slots",
+    "Silhouette is lumpy and melted compared with the crisp low-poly carrier shape",
+    "Textures are partially washed out, especially the lower crate becoming pale blue instead of saturated blue",
+    "Missing clean latch, feet, corner clips, and accurate vent/bar detailing",
+    "Top view suggests an incomplete/warped single form rather than a reliable solid game asset"
+  ],
+  "action": "regen_sheet",
+  "notes": "The concept sheet is ambiguous with multiple carrier sizes per view, and the reconstruction has major structural failures."
+}

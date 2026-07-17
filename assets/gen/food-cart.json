@@ -3,10 +3,7 @@
   "meshes": 1,
   "materials": 1,
   "textures": [
-    "map:2048x2048",
-    "normalMap:2048x2048",
-    "roughnessMap:2048x2048",
-    "metalnessMap:2048x2048"
+    "map:1024x1024"
   ],
   "size": {
     "x": 0.63,
@@ -14,6 +11,6 @@
     "z": 0.85
   },
   "file": "food-cart.glb",
-  "kb": 609,
-  "at": "2026-07-15T10:00:48.949Z"
+  "kb": 219,
+  "at": "2026-07-15T12:59:51.278Z"
 }

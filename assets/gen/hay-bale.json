@@ -1,0 +1,16 @@
+{
+  "triangles": 1064,
+  "meshes": 1,
+  "materials": 1,
+  "textures": [
+    "map:1024x1024"
+  ],
+  "size": {
+    "x": 0.9,
+    "y": 0.94,
+    "z": 1
+  },
+  "file": "hay-bale.glb",
+  "kb": 80,
+  "at": "2026-07-15T12:59:52.369Z"
+}

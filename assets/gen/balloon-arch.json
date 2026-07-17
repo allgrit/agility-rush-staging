@@ -1,0 +1,19 @@
+{
+  "triangles": 1938,
+  "meshes": 1,
+  "materials": 1,
+  "textures": [
+    "map:2048x2048",
+    "normalMap:2048x2048",
+    "roughnessMap:2048x2048",
+    "metalnessMap:2048x2048"
+  ],
+  "size": {
+    "x": 0.27,
+    "y": 1,
+    "z": 0.98
+  },
+  "file": "balloon-arch.glb",
+  "kb": 607,
+  "at": "2026-07-15T10:11:13.498Z"
+}

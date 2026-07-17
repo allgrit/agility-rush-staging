@@ -1,0 +1,19 @@
+{
+  "triangles": 2243,
+  "meshes": 1,
+  "materials": 1,
+  "textures": [
+    "map:2048x2048",
+    "normalMap:2048x2048",
+    "roughnessMap:2048x2048",
+    "metalnessMap:2048x2048"
+  ],
+  "size": {
+    "x": 0.64,
+    "y": 1,
+    "z": 0.99
+  },
+  "file": "ice-cream.glb",
+  "kb": 674,
+  "at": "2026-07-15T10:52:25.866Z"
+}

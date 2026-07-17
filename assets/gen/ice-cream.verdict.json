@@ -1,0 +1,14 @@
+{
+  "attempt": 3,
+  "score": 5,
+  "accept": false,
+  "problems": [
+    "Major duplicated roof ice-cream cone signs; concept has one cone sign but model reconstructed multiple separate cones.",
+    "Front/side consistency is off, with the roof sign placement and silhouette not matching the turnaround.",
+    "Roof shape is blobby and softened compared with the clean faceted low-poly concept.",
+    "Awning scallops and small front details are simplified and less color-accurate than the concept.",
+    "Textures are present but somewhat washed and less crisp."
+  ],
+  "action": "single_image",
+  "notes": "Coherent kiosk body, but duplicated roof cones indicate a significant multiview reconstruction failure."
+}
