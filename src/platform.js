@@ -48,6 +48,13 @@ export async function initPlatform() {
   return vkBridge;
 }
 
+// Повторная фиксация swipe-настроек: iOS-клиент VK сбрасывает их после
+// сворачивания/восстановления webview — переотправляем на каждый ViewRestore.
+export function reapplySwipeSettings() {
+  if (!IS_VK || !vkBridge) return;
+  vkBridge.send('VKWebAppSetSwipeSettings', { history: false }).catch(() => {});
+}
+
 // Имя игрока для онлайн-топа: в VK берём из профиля (если игрок ещё не задал имя вручную).
 export async function resolveVKName() {
   if (!IS_VK || !vkBridge) return null;

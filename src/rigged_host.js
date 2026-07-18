@@ -6,8 +6,11 @@ export function shouldUseRiggedDog(locationLike, params) {
   const isProduction = pathname === '/agility-rush' || pathname.startsWith('/agility-rush/');
   const isStaging = pathname === '/agility-rush-staging'
     || pathname.startsWith('/agility-rush-staging/');
-  // VK Games (VK Mini App) хостится на нашем поддомене — rigged-бордер штатно, как в проде.
-  const isVKHost = hostname === 'agility-rush.tsdpu.org';
+  // VK Games (VK Mini App): наш поддомен ИЛИ любой VK-хостинг (CDN *.pages.vk-apps.com
+  // и т.п.) — признак запуска из VK это vk_app_id в URL, не хостнейм.
+  const isVKHost = hostname === 'agility-rush.tsdpu.org'
+    || hostname.endsWith('.pages.vk-apps.com')
+    || !!params?.get('vk_app_id');
 
   return (isAllgritPages && (isProduction || isStaging))
     || isVKHost

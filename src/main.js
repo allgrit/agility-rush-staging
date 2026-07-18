@@ -5,7 +5,8 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { Game, FIXED_DT } from './game.js';
 import { shouldUseRiggedDog } from './rigged_host.js';
-import { IS_VK, useServiceWorker, initPlatform, resolveVKName, watchVKView, haptic, cloudBackup, cloudRestore } from './platform.js';
+import { QualityController, TIERS, guessInitialTier } from './quality.js';
+import { IS_VK, useServiceWorker, initPlatform, resolveVKName, watchVKView, haptic, cloudBackup, cloudRestore, reapplySwipeSettings } from './platform.js';
 
 // Bootstrap: рендерер, цикл с аккумулятором, ввод, харнесс для покадровой съёмки.
 
@@ -14,7 +15,13 @@ const HARNESS = params.has('harness');
 
 const canvas = document.getElementById('game-canvas');
 const renderer = new THREE.WebGLRenderer({
-  canvas, antialias: true,
+  canvas,
+  // antialias НЕ нужен: финальный кадр рисует OutputPass полноэкранным quad'ом (нет
+  // внутренних рёбер), а сглаживание сцены даёт MSAA render target композера (samples).
+  // MSAA дефолтного фреймбуфера был чистой тратой памяти/пропускной способности на мобиле.
+  antialias: false,
+  // Просим у браузера быстрый GPU (на мобиле — не энергосберегающий). Визуально no-op.
+  powerPreference: 'high-performance',
   // preserveDrawingBuffer нужен только харнессу (toDataURL). В проде он удваивает буфер и
   // лишне грузит память мобильного GPU — включаем ТОЛЬКО в харнессе.
   preserveDrawingBuffer: HARNESS,
@@ -118,6 +125,51 @@ canvas.addEventListener('webglcontextrestored', () => {
 
 const game = new Game(renderer, scene, camera, { dogFactory: null, dogFactoryPromise });
 
+// --- Адаптивное качество: игра сама мерит стоимость кадра и двигает ступень под
+// конкретное устройство. LIVE (DPR/bloom) — на лету; DEFERRED (тени/MSAA) — в меню.
+function applyLiveQuality(tier) {
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, tier.dprCap));
+  if (bloomPass) bloomPass.enabled = tier.bloom;
+  resize(); // пересобрать буферы под новый pixelRatio
+}
+function applyMSAA(samples) {
+  // Пересоздаём буферы композера с нужным числом сэмплов (менять на лету нельзя — только тут).
+  // composer.reset() сам диспозит старые rt1/rt2 И пере-назначает write/readBuffer (иначе
+  // после swapBuffers остаются висячие ссылки на диспознутые буферы → чёрный кадр).
+  const w = window.innerWidth, h = window.innerHeight;
+  const nt = new THREE.WebGLRenderTarget(Math.round(w), Math.round(h), { samples });
+  composer.reset(nt);
+  composer.setSize(w, h); // применит текущий pixelRatio к новым буферам
+}
+function applyDeferredQuality(tier) {
+  // Тени: вкл/выкл + тип (мягкие/жёсткие). Смена типа рекомпилирует материалы → фриз,
+  // поэтому только в безопасный момент.
+  renderer.shadowMap.enabled = tier.shadows;
+  renderer.shadowMap.type = tier.softShadows ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
+  renderer.shadowMap.needsUpdate = true;
+  scene.traverse((o) => {
+    if (!o.material) return;
+    const ms = Array.isArray(o.material) ? o.material : [o.material];
+    for (const m of ms) m.needsUpdate = true;
+  });
+  applyMSAA(tier.msaa);
+}
+const _savedTier = (game.meta.data && typeof game.meta.data.qualityTier === 'number') ? game.meta.data.qualityTier : null;
+const _initialTier = _savedTier != null ? _savedTier : guessInitialTier(navigator.userAgent, window.devicePixelRatio);
+const quality = new QualityController({
+  initialTier: _initialTier,
+  onLive: applyLiveQuality,
+  onDeferred: applyDeferredQuality,
+  onPersist: (idx) => { if (game.meta.data) { game.meta.data.qualityTier = idx; game.meta.save(); } },
+  now: () => performance.now(),
+});
+// Стартовую ступень применяем целиком сразу (ultra = исходная картинка, no-op).
+if (!HARNESS) { applyLiveQuality(TIERS[_initialTier]); applyDeferredQuality(TIERS[_initialTier]); }
+quality.tier = _initialTier; quality.target = _initialTier; quality.pendingDeferred = false;
+window.__quality = quality;
+// Хелпер для тестов/дебага: применить ступень целиком (live + deferred) немедленно.
+window.__applyTier = (i) => { applyLiveQuality(TIERS[i]); applyDeferredQuality(TIERS[i]); quality.tier = i; quality.target = i; quality.pendingDeferred = false; };
+
 // GLB доехал: подключаем rigged-фабрику и пересоздаём собаку (до этого бордер СКРЫТ —
 // процедурная модель на прод-хостах не показывается никогда, см. _setDog).
 if (dogFactoryPromise) {
@@ -191,6 +243,7 @@ function onAppHide() {
 }
 function onAppShow() {
   if (!document.hidden) game.audio.resume();
+  if (IS_VK) reapplySwipeSettings(); // iOS-клиент сбрасывает swipe-настройки при сворачивании
 }
 document.addEventListener('visibilitychange', () => { document.hidden ? onAppHide() : onAppShow(); });
 window.addEventListener('pagehide', onAppHide);
@@ -280,6 +333,15 @@ window.addEventListener('keydown', (e) => {
 // --- Ввод: свайпы ---
 let touchStart = null;
 window.addEventListener('touchstart', (e) => { touchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY }; }, { passive: true });
+// Во время забега гасим нативные жесты webview (iOS edge-swipe «назад» уводил из
+// игры вместо смены полосы): preventDefault возможен только с passive:false.
+// Меню/оверлеи (DOM поверх канваса) не трогаем — там нужен скролл.
+const gestureGuard = (e) => {
+  if (e.target !== canvas) return;
+  if (game.state === 'running' || game.state === 'countdown') e.preventDefault();
+};
+window.addEventListener('touchstart', gestureGuard, { passive: false });
+window.addEventListener('touchmove', gestureGuard, { passive: false });
 window.addEventListener('touchend', (e) => {
   if (!touchStart) return;
   const dx = e.changedTouches[0].clientX - touchStart.x;
@@ -340,16 +402,25 @@ function frame(now) {
     renderAccum += elapsedMs;
     if (renderAccum >= RENDER_DT_MS) {
       renderAccum = renderAccum > RENDER_DT_MS * 2 ? 0 : renderAccum - RENDER_DT_MS;
-      const r0 = PERF ? performance.now() : 0;
+      // Отложенные изменения качества (тени/MSAA — рекомпиляция шейдеров) применяем
+      // ТОЛЬКО в безопасном состоянии, чтобы фриз не пришёлся на забег.
+      if (quality.pendingDeferred && (game.state === 'menu' || game.state === 'countdown' || game.state === 'dead')) {
+        quality.applyDeferredIfPending();
+      }
+      const r0 = performance.now();
       renderFrame();
+      const renderMs = performance.now() - r0;
+      // Адаптация качества: мерим стоимость кадра ТОЛЬКО во время забега (репрезентативная
+      // нагрузка). elapsedMs — интервал кадра (тянем ли 60), renderMs — запас.
+      if (game.state === 'running') quality.sample(elapsedMs, renderMs);
       if (PERF) {
-        perfRenderAcc += performance.now() - r0;
+        perfRenderAcc += renderMs;
         perfFrames++;
         if (perfWinStart === 0) perfWinStart = now;
         else if (now - perfWinStart >= 500) {
           const fps = perfFrames * 1000 / (now - perfWinStart);
           const mem = renderer.info.memory;
-          perfEl.textContent = `${fps.toFixed(0)} fps · ${(perfRenderAcc / perfFrames).toFixed(1)}ms · geo ${mem.geometries} · tex ${mem.textures} · dpr ${renderer.getPixelRatio()}`;
+          perfEl.textContent = `${fps.toFixed(0)} fps · ${(perfRenderAcc / perfFrames).toFixed(1)}ms · geo ${mem.geometries} · tex ${mem.textures} · dpr ${renderer.getPixelRatio().toFixed(2)} · q${quality.target}(${TIERS[quality.target].name})`;
           perfFrames = 0; perfRenderAcc = 0; perfWinStart = now;
         }
       }

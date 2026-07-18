@@ -1376,7 +1376,7 @@ export class Game {
         this.runStats.tunnels++;
         this.fx.poof(new THREE.Vector3(d.x, 0.4, d.z));
         if (e.goodEntry) {
-          const perfect = e.slideAtEntry > 0.45; // нырнул в последний момент чётко
+          const perfect = e.slideAtEntry > 0.32; // нырок в последние ~0.3 с до входа (0.62 − 0.32)
           this._obstacleClean(e, perfect ? 'perfect' : 'clean', 'ТОННЕЛЬ');
           this.boostT = 1.4;
           this.audio.boost();
